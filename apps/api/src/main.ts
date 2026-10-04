@@ -79,6 +79,44 @@ async function bootstrap() {
   const port = Number(config.get('PORT') ?? 3000);
   app.enableShutdownHooks();
   await app.listen(port);
+  startKeepAlive(config);
+}
+
+const KEEP_ALIVE_MS = 14 * 60 * 1000;
+
+function startKeepAlive(config: ConfigService) {
+  if (config.get('NODE_ENV') !== 'production') {
+    return;
+  }
+  const redirect = config.get<string>('KAKAO_REDIRECT_URI');
+  if (!redirect) {
+    return;
+  }
+  let origin: string;
+  try {
+    origin = new URL(redirect).origin;
+  } catch {
+    return;
+  }
+  if (!origin.startsWith('https://')) {
+    return;
+  }
+
+  const logger = new Logger('KeepAlive');
+  const timer = setInterval(() => {
+    void fetch(`${origin}/health`).then(
+      (response) => {
+        if (!response.ok) {
+          logger.warn(`keep-alive status=${response.status}`);
+        }
+      },
+      (error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        logger.warn(`keep-alive 실패 reason=${reason}`);
+      },
+    );
+  }, KEEP_ALIVE_MS);
+  timer.unref?.();
 }
 
 function registerProcessHandlers() {
