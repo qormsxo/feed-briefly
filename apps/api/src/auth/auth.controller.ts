@@ -35,6 +35,7 @@ export class AuthController {
     const jwt = this.auth.issueJwt(req.user);
     res.cookie(SESSION_COOKIE, jwt, this.auth.cookieOptions());
     const webOrigin = this.config.get('WEB_ORIGIN') ?? 'http://localhost:5173';
+
     return res.redirect(`${webOrigin}/auth/callback`);
   }
 
@@ -50,6 +51,7 @@ export class AuthController {
   @ApiOperation({ summary: '세션 쿠키 삭제' })
   logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie(SESSION_COOKIE, this.auth.cookieOptions());
+
     return { ok: true };
   }
 }

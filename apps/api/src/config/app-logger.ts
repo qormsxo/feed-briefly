@@ -1,6 +1,9 @@
 import { ConsoleLogger, LoggerService, LogLevel } from '@nestjs/common';
 import { appendFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+import { isString } from '../common/parse';
+
+type LogInput = string | number | boolean | null | undefined | Error;
 
 export class AppLogger implements LoggerService {
   private readonly console: ConsoleLogger;
@@ -15,27 +18,27 @@ export class AppLogger implements LoggerService {
     mkdirSync(dirname(filePath), { recursive: true });
   }
 
-  log(message: unknown, ...optional: unknown[]) {
+  log(message: LogInput, ...optional: LogInput[]) {
     this.emit('log', message, optional);
   }
 
-  error(message: unknown, ...optional: unknown[]) {
+  error(message: LogInput, ...optional: LogInput[]) {
     this.emit('error', message, optional);
   }
 
-  warn(message: unknown, ...optional: unknown[]) {
+  warn(message: LogInput, ...optional: LogInput[]) {
     this.emit('warn', message, optional);
   }
 
-  debug(message: unknown, ...optional: unknown[]) {
+  debug(message: LogInput, ...optional: LogInput[]) {
     this.emit('debug', message, optional);
   }
 
-  verbose(message: unknown, ...optional: unknown[]) {
+  verbose(message: LogInput, ...optional: LogInput[]) {
     this.emit('verbose', message, optional);
   }
 
-  private emit(level: LogLevel, message: unknown, optional: unknown[]) {
+  private emit(level: LogLevel, message: LogInput, optional: LogInput[]) {
     const text = format(message);
     const rest = optional.map((value) => format(value));
     this.writeConsole(level, text, rest);
@@ -46,18 +49,23 @@ export class AppLogger implements LoggerService {
     switch (level) {
       case 'error':
         this.console.error(text, ...rest);
+
         return;
       case 'warn':
         this.console.warn(text, ...rest);
+
         return;
       case 'debug':
         this.console.debug(text, ...rest);
+
         return;
       case 'verbose':
         this.console.verbose(text, ...rest);
+
         return;
       case 'fatal':
         this.console.fatal(text, ...rest);
+
         return;
       default:
         this.console.log(text, ...rest);
@@ -68,6 +76,7 @@ export class AppLogger implements LoggerService {
     if (!this.enabled.has(level) || isQueryLog(text)) {
       return;
     }
+
     const parts = [text, ...rest].filter((part) => part.length > 0);
     appendFileSync(
       this.filePath,
@@ -76,20 +85,23 @@ export class AppLogger implements LoggerService {
   }
 }
 
-function isQueryLog(message: unknown) {
-  return /^\s*query:/i.test(format(message));
+function isQueryLog(message: string) {
+  return /^\s*query:/i.test(message);
 }
 
-function format(value: unknown) {
-  if (typeof value === 'string') {
+function format(value: LogInput) {
+  if (isString(value)) {
     return value;
   }
+
   if (value instanceof Error) {
     return value.stack ?? value.message;
   }
+
   if (value === undefined) {
     return '';
   }
+
   try {
     return JSON.stringify(value);
   } catch {

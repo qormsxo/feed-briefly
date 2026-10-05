@@ -1,7 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { QueryFailedError, Repository } from 'typeorm';
-import { RssParserService } from '../rss/rss-parser.service';
-import { Feed } from './feed.entity';
+import { QueryFailedError } from 'typeorm';
 import { FeedsService } from './feeds.service';
 
 describe('FeedsService', () => {
@@ -12,14 +10,12 @@ describe('FeedsService', () => {
     findOneBy: jest.fn(),
     remove: jest.fn(),
   };
+
   const rss = {
     assertValidFeed: jest.fn(),
   };
 
-  const service = new FeedsService(
-    feeds as unknown as Repository<Feed>,
-    rss as unknown as RssParserService,
-  );
+  const service = new FeedsService(feeds, rss);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -47,8 +43,9 @@ describe('FeedsService', () => {
 
   it('maps unique violation to ConflictException', async () => {
     rss.assertValidFeed.mockResolvedValue({ title: 'HN', items: [] });
-    const error = new QueryFailedError('', [], new Error('dup'));
-    (error as QueryFailedError & { code: string }).code = '23505';
+    const driverError = new Error('dup');
+    Object.assign(driverError, { code: '23505' });
+    const error = new QueryFailedError('', [], driverError);
     feeds.save.mockRejectedValue(error);
     await expect(
       service.create('u1', { url: 'https://hnrss.org/newest' }),

@@ -33,6 +33,7 @@ describe('news-extract', () => {
       <a href="https://n.news.naver.com/mnews/article/001/0016325217?sid=100">naver</a>
       <a href="/politics">section</a>
     `;
+
     expect(
       extractNewsListingLinks(html, 'https://news.daum.net/politics'),
     ).toEqual([
@@ -50,10 +51,12 @@ describe('news-extract', () => {
         <p>두 번째 문단입니다. 후속 논의와 일정까지 이어서 설명해 추출이 되게 합니다.</p>
       </div>
     `;
+
     const article = extractNewsArticle(
       html,
       'https://n.news.naver.com/mnews/article/001/1',
     );
+
     expect(article.title).toBe('본회의 결과');
     expect(article.text).toContain('첫 번째 문단');
     expect(article.publishedAt?.toISOString()).toBe(

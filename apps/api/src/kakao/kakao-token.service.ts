@@ -1,11 +1,12 @@
 import {
+  Inject,
   Injectable,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KAKAO_TOKEN_URL } from '../auth/auth.constants';
-import { KakaoTokenResponse } from '../auth/kakao.types';
+import { isKakaoToken } from '../auth/kakao.types';
 import { TokenCryptoService } from '../common/crypto/token-crypto.service';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
@@ -17,20 +18,37 @@ export class KakaoTokenService {
   private readonly logger = new Logger(KakaoTokenService.name);
 
   constructor(
-    private readonly config: ConfigService,
-    private readonly crypto: TokenCryptoService,
-    private readonly users: UsersService,
+    @Inject(ConfigService)
+    private readonly config: { getOrThrow(key: string): string },
+    @Inject(TokenCryptoService)
+    private readonly crypto: {
+      decrypt(value: string): string;
+      encrypt(value: string): string;
+    },
+    @Inject(UsersService)
+    private readonly users: {
+      saveKakaoTokens(
+        user: User,
+        tokens: {
+          kakaoAccessToken: string;
+          kakaoRefreshToken: string;
+          kakaoTokenExpiresAt: Date | null;
+        },
+      ): Promise<User>;
+    },
   ) {}
 
   async getValidAccessToken(user: User): Promise<string> {
     if (!this.isExpiringSoon(user.kakaoTokenExpiresAt)) {
       return this.crypto.decrypt(user.kakaoAccessToken);
     }
+
     return this.refresh(user);
   }
 
   async refresh(user: User): Promise<string> {
     const refreshToken = this.crypto.decrypt(user.kakaoRefreshToken);
+
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: this.config.getOrThrow('KAKAO_REST_API_KEY'),
@@ -51,7 +69,14 @@ export class KakaoTokenService {
       throw new UnauthorizedException('카카오 토큰 갱신에 실패했습니다');
     }
 
-    const tokens = (await response.json()) as KakaoTokenResponse;
+    const payload: unknown = await response.json();
+
+    if (!isKakaoToken(payload)) {
+      throw new UnauthorizedException('카카오 토큰 갱신에 실패했습니다');
+    }
+
+    const tokens = payload;
+
     const nextRefresh = tokens.refresh_token
       ? this.crypto.encrypt(tokens.refresh_token)
       : user.kakaoRefreshToken;
@@ -69,6 +94,7 @@ export class KakaoTokenService {
     if (!expiresAt) {
       return true;
     }
+
     return expiresAt.getTime() - Date.now() < EXPIRY_SKEW_MS;
   }
 }

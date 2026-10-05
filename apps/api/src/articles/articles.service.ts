@@ -1,14 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
+import {
+  FindManyOptions,
+  FindOptionsWhere,
+  In,
+  IsNull,
+  MoreThanOrEqual,
+  QueryDeepPartialEntity,
+  UpdateResult,
+} from 'typeorm';
 import { newsThemeLabel } from '../crawl/news-themes';
 import { Article } from './article.entity';
+
+type ArticleStore = {
+  find(options: FindManyOptions<Article>): Promise<Article[]>;
+  findAndCount(options: FindManyOptions<Article>): Promise<[Article[], number]>;
+  update(
+    criteria: FindOptionsWhere<Article>,
+    values: QueryDeepPartialEntity<Article>,
+  ): Promise<UpdateResult>;
+};
 
 @Injectable()
 export class ArticlesService {
   constructor(
     @InjectRepository(Article)
-    private readonly articles: Repository<Article>,
+    private readonly articles: ArticleStore,
   ) {}
 
   listUnsentSince(userId: string, since: Date, take = 20) {
@@ -27,6 +44,7 @@ export class ArticlesService {
     if (ids.length === 0) {
       return Promise.resolve();
     }
+
     return this.articles.update({ id: In(ids) }, { kakaoSentAt: new Date() });
   }
 
@@ -38,6 +56,7 @@ export class ArticlesService {
       skip: (page - 1) * limit,
       take: limit,
     });
+
     return {
       items: rows.map((row) => ({
         id: row.id,

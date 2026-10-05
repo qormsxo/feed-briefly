@@ -7,6 +7,7 @@ import { queryClient } from '../lib/query-client';
 export function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
+
   const logoutMutation = useMutation({
     mutationFn: logout,
     onSuccess: async () => {

@@ -13,7 +13,7 @@ import {
   KAKAO_USER_ME_URL,
 } from './auth.constants';
 import { AuthUser, JwtPayload } from './auth.types';
-import { KakaoProfileResponse, KakaoTokenResponse } from './kakao.types';
+import { KakaoProfileResponse, KakaoTokenResponse, isKakaoProfile, isKakaoToken } from './kakao.types';
 import { sessionCookieOptions } from './session-cookie';
 
 @Injectable()
@@ -34,20 +34,29 @@ export class AuthService {
       response_type: 'code',
       scope: 'profile_nickname,talk_message',
     });
+
     return `${KAKAO_AUTHORIZE_URL}?${params.toString()}`;
   }
 
   async loginWithKakaoCode(code: string): Promise<AuthUser> {
     const tokens = await this.exchangeCode(code);
+
+    if (!tokens.refresh_token) {
+      throw new UnauthorizedException('카카오 토큰 교환에 실패했습니다');
+    }
+
+    const refreshToken = tokens.refresh_token;
     const profile = await this.fetchProfile(tokens.access_token);
+
     const user = await this.users.upsertFromKakao({
       kakaoId: String(profile.id),
       nickname: profile.kakao_account?.profile?.nickname ?? null,
       email: profile.kakao_account?.email ?? null,
       kakaoAccessToken: this.tokenCrypto.encrypt(tokens.access_token),
-      kakaoRefreshToken: this.tokenCrypto.encrypt(tokens.refresh_token),
+      kakaoRefreshToken: this.tokenCrypto.encrypt(refreshToken),
       kakaoTokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
     });
+
     return {
       id: user.id,
       kakaoId: user.kakaoId,
@@ -57,6 +66,7 @@ export class AuthService {
 
   issueJwt(user: AuthUser) {
     const payload: JwtPayload = { sub: user.id, kakaoId: user.kakaoId };
+
     return this.jwt.sign(payload);
   }
 
@@ -90,7 +100,13 @@ export class AuthService {
       throw new UnauthorizedException('카카오 토큰 교환에 실패했습니다');
     }
 
-    return (await response.json()) as KakaoTokenResponse;
+    const payload: unknown = await response.json();
+
+    if (!isKakaoToken(payload)) {
+      throw new UnauthorizedException('카카오 토큰 교환에 실패했습니다');
+    }
+
+    return payload;
   }
 
   private async fetchProfile(accessToken: string): Promise<KakaoProfileResponse> {
@@ -103,6 +119,12 @@ export class AuthService {
       throw new UnauthorizedException('카카오 사용자 정보를 가져오지 못했습니다');
     }
 
-    return (await response.json()) as KakaoProfileResponse;
+    const body: unknown = await response.json();
+
+    if (!isKakaoProfile(body)) {
+      throw new UnauthorizedException('카카오 사용자 정보를 가져오지 못했습니다');
+    }
+
+    return body;
   }
 }

@@ -7,6 +7,7 @@ export function sessionCookieOptions(input: {
   redirectUri: string;
 }): CookieOptions {
   const production = isProduction(input.nodeEnv);
+
   return {
     httpOnly: true,
     secure: production,
@@ -24,6 +25,7 @@ function cookieSameSite(
   if (!production) {
     return 'lax';
   }
+
   return isCrossSite(webOrigin, redirectUri) ? 'none' : 'lax';
 }
 
@@ -31,6 +33,7 @@ function isCrossSite(webOrigin: string, redirectUri: string): boolean {
   try {
     const webHost = new URL(parseOrigins(webOrigin)[0] ?? '').hostname;
     const apiHost = new URL(redirectUri).hostname;
+
     return Boolean(webHost) && webHost !== apiHost;
   } catch {
     return true;

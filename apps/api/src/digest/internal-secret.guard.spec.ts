@@ -1,8 +1,8 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InternalSecretGuard } from './internal-secret.guard';
 
-function contextWithSecret(secret?: string) {
+function contextWithSecret(secret?: string): ExecutionContext {
+  // SAFETY: the spec only reads the internal secret header.
   return {
     switchToHttp: () => ({
       getRequest: () => ({
@@ -12,29 +12,28 @@ function contextWithSecret(secret?: string) {
   } as ExecutionContext;
 }
 
+function guardWith(secret: string) {
+  return new InternalSecretGuard({
+    get: () => secret,
+  });
+}
+
 describe('InternalSecretGuard', () => {
   it('allows a matching secret', () => {
-    const guard = new InternalSecretGuard({
-      get: () => 's3cret',
-    } as unknown as ConfigService);
-    expect(guard.canActivate(contextWithSecret('s3cret'))).toBe(true);
+    expect(guardWith('s3cret').canActivate(contextWithSecret('s3cret'))).toBe(
+      true,
+    );
   });
 
   it('rejects a missing or empty env secret', () => {
-    const guard = new InternalSecretGuard({
-      get: () => '',
-    } as unknown as ConfigService);
-    expect(() => guard.canActivate(contextWithSecret('s3cret'))).toThrow(
+    expect(() => guardWith('').canActivate(contextWithSecret('s3cret'))).toThrow(
       UnauthorizedException,
     );
   });
 
   it('rejects a mismatched header', () => {
-    const guard = new InternalSecretGuard({
-      get: () => 's3cret',
-    } as unknown as ConfigService);
-    expect(() => guard.canActivate(contextWithSecret('nope'))).toThrow(
-      UnauthorizedException,
-    );
+    expect(() =>
+      guardWith('s3cret').canActivate(contextWithSecret('nope')),
+    ).toThrow(UnauthorizedException);
   });
 });

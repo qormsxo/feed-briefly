@@ -57,6 +57,7 @@ export class FeedsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     await this.feeds.remove(user.id, id);
+
     return { ok: true };
   }
 }

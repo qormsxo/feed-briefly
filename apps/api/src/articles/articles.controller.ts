@@ -38,6 +38,7 @@ export class ArticlesController {
     const articles = await this.ingest.ingestForUser(user.id);
     const since = new Date(pressedAt.getTime() - LOOKBACK_MS);
     const kakao = await this.digest.sendUnsentForUser(user.id, since);
+
     return {
       count: articles.length,
       sent: kakao.sent,

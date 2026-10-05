@@ -8,9 +8,11 @@ export type RankableArticle = {
 export function sortByInterest<T extends RankableArticle>(articles: T[]): T[] {
   return [...articles].sort((left, right) => {
     const interestDiff = right.interest - left.interest;
+
     if (interestDiff !== 0) {
       return interestDiff;
     }
+
     return right.collectedAt.getTime() - left.collectedAt.getTime();
   });
 }
@@ -26,6 +28,7 @@ export function buildKakaoText(
   const linkBlock = url ? `\n\n${url}` : '';
 
   const withoutBody = `${heading}${linkBlock}`;
+
   if (withoutBody.length >= KAKAO_TEXT_MAX) {
     return withoutBody.slice(0, KAKAO_TEXT_MAX);
   }
@@ -35,13 +38,16 @@ export function buildKakaoText(
   }
 
   const full = `${heading}\n\n${body}${linkBlock}`;
+
   if (full.length <= KAKAO_TEXT_MAX) {
     return full;
   }
 
   const budget = KAKAO_TEXT_MAX - heading.length - 2 - linkBlock.length - 1;
+
   if (budget < 8) {
     return withoutBody;
   }
+
   return `${heading}\n\n${body.slice(0, budget)}…${linkBlock}`;
 }

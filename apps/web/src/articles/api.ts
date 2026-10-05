@@ -25,6 +25,7 @@ export function listArticles(page: number, limit = 10) {
     page: String(page),
     limit: String(limit),
   });
+
   return http<ArticlePage>(`/api/articles?${params.toString()}`);
 }
 

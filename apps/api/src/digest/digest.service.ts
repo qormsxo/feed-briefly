@@ -30,6 +30,7 @@ export class DigestService {
     const ingested = await this.ingest.ingestAll();
     const since = new Date(Date.now() - LOOKBACK_MS);
     const users = await this.users.findAll();
+
     const results: Array<{ userId: string; status: string; articleCount: number }> =
       [];
 
@@ -47,20 +48,24 @@ export class DigestService {
 
   async sendUnsentForUser(userId: string, since: Date) {
     const user = await this.users.findById(userId);
+
     if (!user) {
       return { sent: 0, error: '사용자를 찾을 수 없습니다' };
     }
 
     const unsent = await this.articles.listUnsentSince(userId, since);
+
     if (unsent.length === 0) {
       return { sent: 0 };
     }
 
     const outgoing = sortByInterest(unsent);
+
     try {
       for (const article of outgoing) {
         await this.talk.sendMemoToMe(user, this.buildText(article));
       }
+
       await this.articles.markKakaoSent(unsent.map((article) => article.id));
       await this.logs.save(
         this.logs.create({
@@ -70,6 +75,7 @@ export class DigestService {
           errorMessage: null,
         }),
       );
+
       return { sent: outgoing.length };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';
@@ -82,6 +88,7 @@ export class DigestService {
           errorMessage: message,
         }),
       );
+
       return { sent: 0, error: message };
     }
   }

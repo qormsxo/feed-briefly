@@ -20,6 +20,18 @@ describe('envValidationSchema', () => {
     expect(result.error).toBeUndefined();
   });
 
+  it('defaults log level from node env', () => {
+    const dev = envValidationSchema.validate(valid, { abortEarly: false });
+    expect(dev.value.LOG_LEVEL).toBe('debug');
+
+    const prod = envValidationSchema.validate(
+      { ...valid, NODE_ENV: 'production' },
+      { abortEarly: false },
+    );
+
+    expect(prod.value.LOG_LEVEL).toBe('warn');
+  });
+
   it('rejects a missing secret', () => {
     const { GEMINI_API_KEY: _omit, ...rest } = valid;
     const result = envValidationSchema.validate(rest);

@@ -13,6 +13,7 @@ export class HealthController {
   @ApiOperation({ summary: '프로세스 및 DB 연결 확인' })
   async check() {
     await this.dataSource.query('SELECT 1');
+
     return { status: 'ok' };
   }
 }

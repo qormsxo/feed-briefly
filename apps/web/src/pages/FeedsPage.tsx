@@ -27,9 +27,11 @@ export function FeedsPage() {
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     const trimmed = url.trim();
+
     if (!trimmed) {
       return;
     }
+
     createMutation.mutate(trimmed);
   }
 

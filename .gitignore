@@ -16,3 +16,7 @@ Thumbs.db
 !.vscode/extensions.json
 *.tsbuildinfo
 .vercel
+
+# install-anti-slop skill bundle
+.agents/skills/install-anti-slop/
+skills-lock.json

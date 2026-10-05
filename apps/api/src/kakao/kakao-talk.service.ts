@@ -22,6 +22,7 @@ export class KakaoTalkService {
     const body = new URLSearchParams({
       template_object: JSON.stringify(template),
     });
+
     return this.kakao.request(user, {
       method: 'POST',
       url: '/v2/api/talk/memo/default/send',

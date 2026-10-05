@@ -63,13 +63,16 @@ async function bootstrap() {
       'internal-secret',
     )
     .build();
+
   const document = SwaggerModule.createDocument(app, swaggerConfig);
+
   const swaggerUi = {
     swaggerOptions: {
       persistAuthorization: true,
       withCredentials: true,
     },
   };
+
   SwaggerModule.setup('docs', app, document, swaggerUi);
   SwaggerModule.setup('docs', app, document, {
     ...swaggerUi,
@@ -88,21 +91,27 @@ function startKeepAlive(config: ConfigService) {
   if (config.get('NODE_ENV') !== 'production') {
     return;
   }
+
   const redirect = config.get<string>('KAKAO_REDIRECT_URI');
+
   if (!redirect) {
     return;
   }
+
   let origin: string;
+
   try {
     origin = new URL(redirect).origin;
   } catch {
     return;
   }
+
   if (!origin.startsWith('https://')) {
     return;
   }
 
   const logger = new Logger('KeepAlive');
+
   const timer = setInterval(() => {
     void fetch(`${origin}/health`).then(
       (response) => {
@@ -110,12 +119,13 @@ function startKeepAlive(config: ConfigService) {
           logger.warn(`keep-alive status=${response.status}`);
         }
       },
-      (error: unknown) => {
+      (error) => {
         const reason = error instanceof Error ? error.message : String(error);
         logger.warn(`keep-alive 실패 reason=${reason}`);
       },
     );
   }, KEEP_ALIVE_MS);
+
   timer.unref?.();
 }
 
@@ -134,4 +144,5 @@ function registerProcessHandlers() {
 }
 
 registerProcessHandlers();
+
 void bootstrap();

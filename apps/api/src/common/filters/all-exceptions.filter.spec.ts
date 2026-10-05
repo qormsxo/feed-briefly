@@ -1,8 +1,10 @@
 import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 
-function createHost(response: { status: jest.Mock; json: jest.Mock }) {
+function createHost(response: { status: jest.Mock; json: jest.Mock }): ArgumentsHost {
   response.status.mockReturnValue(response);
+
+  // SAFETY: the spec only reads the HTTP request and response.
   return {
     switchToHttp: () => ({
       getResponse: () => response,

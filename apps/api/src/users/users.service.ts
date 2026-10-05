@@ -33,14 +33,17 @@ export class UsersService {
 
   async upsertFromKakao(input: KakaoUserUpsert) {
     const existing = await this.findByKakaoId(input.kakaoId);
+
     if (existing) {
       existing.nickname = input.nickname;
       existing.email = input.email;
       existing.kakaoAccessToken = input.kakaoAccessToken;
       existing.kakaoRefreshToken = input.kakaoRefreshToken;
       existing.kakaoTokenExpiresAt = input.kakaoTokenExpiresAt;
+
       return this.users.save(existing);
     }
+
     return this.users.save(this.users.create(input));
   }
 
@@ -55,6 +58,7 @@ export class UsersService {
     user.kakaoAccessToken = tokens.kakaoAccessToken;
     user.kakaoRefreshToken = tokens.kakaoRefreshToken;
     user.kakaoTokenExpiresAt = tokens.kakaoTokenExpiresAt;
+
     return this.users.save(user);
   }
 }

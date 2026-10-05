@@ -15,18 +15,21 @@ export function HistoryPage() {
   const [page, setPage] = useState(1);
   const themes = useQuery({ queryKey: ['themes'], queryFn: listThemes });
   const keywords = useQuery({ queryKey: ['keywords'], queryFn: listKeywords });
+
   const saveMutation = useMutation({
     mutationFn: saveThemes,
     onSuccess: (data) => {
       queryClient.setQueryData(['themes'], data);
     },
   });
+
   const keywordMutation = useMutation({
     mutationFn: saveKeywords,
     onSuccess: (data) => {
       queryClient.setQueryData(['keywords'], data);
     },
   });
+
   const ingestMutation = useMutation({
     mutationFn: ingestArticles,
     onSuccess: async () => {
@@ -34,6 +37,7 @@ export function HistoryPage() {
       await queryClient.invalidateQueries({ queryKey: ['articles'] });
     },
   });
+
   const history = useQuery({
     queryKey: ['articles', page],
     queryFn: () => listArticles(page),
@@ -43,18 +47,21 @@ export function HistoryPage() {
   const selected = new Set(themes.data?.selected ?? []);
   const items = history.data?.items ?? [];
   const ingestResult = ingestMutation.data;
+
   const saveError =
     saveMutation.error instanceof ApiError
       ? saveMutation.error.message
       : saveMutation.isError
         ? '저장에 실패했습니다'
         : null;
+
   const keywordError =
     keywordMutation.error instanceof ApiError
       ? keywordMutation.error.message
       : keywordMutation.isError
         ? '키워드 저장에 실패했습니다'
         : null;
+
   const keywordValue = keywords.data ?? { include: [], exclude: [] };
 
   function changeKeywords(next: UserKeywords) {
@@ -63,11 +70,13 @@ export function HistoryPage() {
 
   function toggle(id: string) {
     const next = new Set(selected);
+
     if (next.has(id)) {
       next.delete(id);
     } else {
       next.add(id);
     }
+
     saveMutation.mutate([...next]);
   }
 
@@ -81,6 +90,7 @@ export function HistoryPage() {
             <div className="flex flex-wrap gap-2">
               {themes.data?.catalog.map((theme) => {
                 const on = selected.has(theme.id);
+
                 return (
                   <button
                     key={theme.id}
@@ -256,13 +266,16 @@ function KeywordField({
 
   function commit(event?: FormEvent) {
     event?.preventDefault();
+
     const next = draft
       .split(/[,，]/)
       .map((word) => word.trim())
       .filter(Boolean);
+
     if (next.length === 0) {
       return;
     }
+
     onAdd(next);
     setDraft('');
   }

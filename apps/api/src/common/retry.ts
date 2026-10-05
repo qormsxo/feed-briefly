@@ -1,18 +1,29 @@
 import { Logger } from '@nestjs/common';
+import { isError, isNumber } from './parse';
 
 export type RetryOptions = {
   retries?: number;
   delayMs?: number;
   logger?: Logger;
-  retryOn?: (error: unknown) => boolean;
+  retryOn?: (error: Error) => boolean;
 };
 
-export function isDailyQuotaError(error: unknown): boolean {
-  if (statusOf(error) === 429) {
+type StatusError = Error & { status: number };
+
+function hasNumericStatus(error: Error): error is StatusError {
+  if (!('status' in error)) {
+    return false;
+  }
+
+  return isNumber(error.status);
+}
+
+export function isDailyQuotaError(error: Error): boolean {
+  if (hasNumericStatus(error) && error.status === 429) {
     return true;
   }
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('[429') || message.includes('Quota exceeded');
+
+  return error.message.includes('[429') || error.message.includes('Quota exceeded');
 }
 
 export async function withRetry<T>(
@@ -22,35 +33,30 @@ export async function withRetry<T>(
 ): Promise<T> {
   const retries = options.retries ?? 3;
   const delayMs = options.delayMs ?? 400;
-  let lastError: unknown;
+  let lastError: Error | undefined;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (error) {
-      lastError = error;
-      const reason = error instanceof Error ? error.message : String(error);
-      const retry =
-        attempt < retries && (options.retryOn?.(error) ?? true);
+      const failure = isError(error) ? error : new Error(String(error));
+      lastError = failure;
+
+      const retry = attempt < retries && (options.retryOn?.(failure) ?? true);
+
       options.logger?.warn(
-        `${operation} 실패 attempt=${attempt}/${retries} reason=${reason}`,
+        `${operation} 실패 attempt=${attempt}/${retries} reason=${failure.message}`,
       );
+
       if (!retry) {
         break;
       }
+
       await sleep(delayMs * attempt);
     }
   }
 
   throw lastError;
-}
-
-function statusOf(error: unknown): number | undefined {
-  if (!error || typeof error !== 'object') {
-    return undefined;
-  }
-  const status = (error as { status?: unknown }).status;
-  return typeof status === 'number' ? status : undefined;
 }
 
 function sleep(ms: number) {

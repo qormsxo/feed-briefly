@@ -14,6 +14,7 @@ export function postgresSsl(databaseSsl?: string) {
 
 export function typeormNestOptions(env: DbEnv): TypeOrmModuleOptions {
   const production = isProduction(env.NODE_ENV);
+
   return {
     type: 'postgres',
     url: env.DATABASE_URL,
@@ -28,6 +29,7 @@ export function typeormNestOptions(env: DbEnv): TypeOrmModuleOptions {
 
 export function typeormCliOptions(env: DbEnv): DataSourceOptions {
   const compiled = __filename.endsWith('.js');
+
   return {
     type: 'postgres',
     url: env.DATABASE_URL,

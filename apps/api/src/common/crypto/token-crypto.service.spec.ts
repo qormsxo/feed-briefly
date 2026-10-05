@@ -1,4 +1,3 @@
-import { ConfigService } from '@nestjs/config';
 import { TokenCryptoService } from './token-crypto.service';
 
 const KEY = 'ab'.repeat(32);
@@ -6,7 +5,7 @@ const KEY = 'ab'.repeat(32);
 function createService() {
   return new TokenCryptoService({
     getOrThrow: () => KEY,
-  } as unknown as ConfigService);
+  });
 }
 
 describe('TokenCryptoService', () => {
@@ -27,7 +26,7 @@ describe('TokenCryptoService', () => {
       () =>
         new TokenCryptoService({
           getOrThrow: () => 'short',
-        } as unknown as ConfigService),
+        }),
     ).toThrow('TOKEN_ENCRYPTION_KEY must be 32-byte hex');
   });
 

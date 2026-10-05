@@ -27,6 +27,7 @@ describe('요약 개수 배분', () => {
       '{"title":"다","summary":"세 줄","interest":4}',
       ']}',
     ].join('');
+
     expect(parseSummaries(raw, ['원제1', '원제2', '원제3'])).toEqual([
       { title: '가', summary: '한 줄', interest: 9 },
       null,

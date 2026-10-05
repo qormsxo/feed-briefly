@@ -20,17 +20,20 @@ export class KakaoTokenGuard implements CanActivate {
       user?: AuthUser;
       kakaoUser?: unknown;
     }>();
+
     if (!request.user) {
       throw new UnauthorizedException();
     }
 
     const user = await this.users.findById(request.user.id);
+
     if (!user) {
       throw new UnauthorizedException();
     }
 
     await this.tokens.getValidAccessToken(user);
     request.kakaoUser = user;
+
     return true;
   }
 }

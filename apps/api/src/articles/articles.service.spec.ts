@@ -1,16 +1,13 @@
-import { Repository } from 'typeorm';
-import { Article } from './article.entity';
 import { ArticlesService } from './articles.service';
 
 describe('ArticlesService', () => {
   const articles = {
     findAndCount: jest.fn(),
     find: jest.fn(),
+    update: jest.fn(),
   };
 
-  const service = new ArticlesService(
-    articles as unknown as Repository<Article>,
-  );
+  const service = new ArticlesService(articles);
 
   beforeEach(() => {
     jest.clearAllMocks();

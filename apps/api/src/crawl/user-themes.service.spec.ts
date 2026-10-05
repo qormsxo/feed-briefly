@@ -1,6 +1,4 @@
 import { BadRequestException } from '@nestjs/common';
-import { Repository } from 'typeorm';
-import { UserTheme } from './user-theme.entity';
 import { UserThemesService } from './user-themes.service';
 
 describe('UserThemesService', () => {
@@ -11,9 +9,7 @@ describe('UserThemesService', () => {
     remove: jest.fn(),
   };
 
-  const service = new UserThemesService(
-    themes as unknown as Repository<UserTheme>,
-  );
+  const service = new UserThemesService(themes);
 
   beforeEach(() => {
     jest.clearAllMocks();

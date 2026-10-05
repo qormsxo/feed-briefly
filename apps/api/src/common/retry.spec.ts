@@ -13,6 +13,7 @@ describe('withRetry', () => {
       .mockRejectedValueOnce(new Error('temp'))
       .mockRejectedValueOnce(new Error('temp'))
       .mockResolvedValue('ok');
+
     await expect(withRetry('op', fn, { delayMs: 1, retries: 3 })).resolves.toBe(
       'ok',
     );
@@ -23,6 +24,7 @@ describe('withRetry', () => {
     const error = new Error(
       '[429 Too Many Requests] Quota exceeded for metric: generate_content_free_tier_requests',
     );
+
     const fn = jest.fn(() => Promise.reject(error));
     await expect(
       withRetry('op', fn, {
