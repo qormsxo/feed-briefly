@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Article } from '../articles/article.entity';
+import { DigestLog } from '../digest/digest-log.entity';
 import { User } from './user.entity';
 
 export type KakaoUserUpsert = {
@@ -60,5 +62,20 @@ export class UsersService {
     user.kakaoTokenExpiresAt = tokens.kakaoTokenExpiresAt;
 
     return this.users.save(user);
+  }
+
+  /** 기사·다이제스트 로그까지 지운 뒤 유저를 삭제한다. 테마·키워드·피드는 CASCADE. */
+  async deleteAccount(userId: string) {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('사용자를 찾을 수 없습니다');
+    }
+
+    await this.users.manager.transaction(async (manager) => {
+      await manager.delete(Article, { userId });
+      await manager.delete(DigestLog, { userId });
+      await manager.delete(User, { id: userId });
+    });
   }
 }

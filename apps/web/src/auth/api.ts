@@ -14,3 +14,7 @@ export function fetchMe() {
 export function logout() {
   return http<{ ok: boolean }>('/api/auth/logout', { method: 'POST' });
 }
+
+export function withdraw() {
+  return http<{ ok: boolean }>('/api/auth/me', { method: 'DELETE' });
+}

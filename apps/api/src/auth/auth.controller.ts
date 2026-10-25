@@ -1,9 +1,18 @@
-import { Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
+import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 import { SESSION_COOKIE } from './auth.constants';
 import { AuthUser } from './auth.types';
@@ -17,6 +26,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly config: ConfigService,
+    private readonly users: UsersService,
   ) {}
 
   @Get('kakao')
@@ -50,6 +60,20 @@ export class AuthController {
   @Post('logout')
   @ApiOperation({ summary: '세션 쿠키 삭제' })
   logout(@Res({ passthrough: true }) res: Response) {
+    res.clearCookie(SESSION_COOKIE, this.auth.cookieOptions());
+
+    return { ok: true };
+  }
+
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiCookieAuth(SESSION_COOKIE)
+  @ApiOperation({ summary: '회원 탈퇴 — 계정과 관련 데이터 삭제' })
+  async withdraw(
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.users.deleteAccount(user.id);
     res.clearCookie(SESSION_COOKIE, this.auth.cookieOptions());
 
     return { ok: true };

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -121,10 +121,16 @@ export class ArticleIngestService {
 
     const pending: PendingBrief[] = [];
     const seen = new Set<string>();
+    let matchedForRequestUser = 0;
+    let includeKeywordsForRequestUser = 0;
 
     for (const rows of rowsByUser.values()) {
       const keywords = await this.userKeywords.listByUser(rows[0].userId);
       const quotas = briefsPerTheme(rows.length, MAX_BRIEFS_PER_USER);
+
+      if (userId && rows[0].userId === userId) {
+        includeKeywordsForRequestUser = keywords.include.length;
+      }
 
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
@@ -162,6 +168,10 @@ export class ArticleIngestService {
           keywords.exclude,
         );
 
+        if (userId && row.userId === userId) {
+          matchedForRequestUser += matched.length;
+        }
+
         const picked = await this.pickInteresting(row.theme, matched, room);
         this.logger.log(
           `뉴스 테마 수집 theme=${row.theme} candidates=${fresh.length} matched=${matched.length} quota=${room} picked=${picked.length}`,
@@ -178,6 +188,16 @@ export class ArticleIngestService {
           pending.push({ page, userId: row.userId, theme: row.theme });
         }
       }
+    }
+
+    if (
+      userId &&
+      includeKeywordsForRequestUser > 0 &&
+      matchedForRequestUser === 0
+    ) {
+      throw new BadRequestException(
+        '지난 24시간 동안의 뉴스에서 선택한 카테고리에 입력한 키워드가 담긴 항목을 찾을 수 없습니다',
+      );
     }
 
     if (pending.length > 0) {

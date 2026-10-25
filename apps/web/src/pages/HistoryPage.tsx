@@ -62,6 +62,13 @@ export function HistoryPage() {
         ? '키워드 저장에 실패했습니다'
         : null;
 
+  const ingestError =
+    ingestMutation.error instanceof ApiError
+      ? ingestMutation.error.message
+      : ingestMutation.isError
+        ? '수집에 실패했습니다'
+        : null;
+
   const keywordValue = keywords.data ?? { include: [], exclude: [] };
 
   function changeKeywords(next: UserKeywords) {
@@ -175,6 +182,9 @@ export function HistoryPage() {
           />
           요약이 끝나는 대로 아래에 추가됩니다. 끝나면 카카오톡으로도 보냅니다.
         </p>
+      ) : null}
+      {ingestError && !ingestMutation.isPending ? (
+        <p className="mt-6 text-sm text-red-400">{ingestError}</p>
       ) : null}
       {ingestResult && !ingestMutation.isPending ? (
         <p className="mt-6 text-sm text-zinc-300">

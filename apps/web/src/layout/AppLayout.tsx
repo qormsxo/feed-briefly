@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate } from 'react-router-dom';
-import { logout } from '../auth/api';
+import { logout, withdraw } from '../auth/api';
 import { useAuth } from '../auth/use-auth';
 import { queryClient } from '../lib/query-client';
 
@@ -15,6 +15,26 @@ export function AppLayout() {
       navigate('/login');
     },
   });
+
+  const withdrawMutation = useMutation({
+    mutationFn: withdraw,
+    onSuccess: async () => {
+      queryClient.clear();
+      navigate('/login');
+    },
+  });
+
+  function confirmWithdraw() {
+    if (
+      !window.confirm(
+        '탈퇴하면 계정과 요약·테마·키워드가 모두 삭제됩니다. 계속할까요?',
+      )
+    ) {
+      return;
+    }
+
+    withdrawMutation.mutate();
+  }
 
   return (
     <div className="min-h-screen bg-[#0F1218] text-zinc-100">
@@ -38,6 +58,14 @@ export function AppLayout() {
             onClick={() => logoutMutation.mutate()}
           >
             로그아웃
+          </button>
+          <button
+            type="button"
+            disabled={withdrawMutation.isPending}
+            className="text-zinc-400 hover:text-red-400 disabled:opacity-50"
+            onClick={confirmWithdraw}
+          >
+            {withdrawMutation.isPending ? '탈퇴 중' : '회원탈퇴'}
           </button>
         </nav>
         </div>
