@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ApiError } from '../lib/http';
+import { errorText } from '../lib/http';
 import { queryClient } from '../lib/query-client';
 import { createFeed, deleteFeed, listFeeds } from '../feeds/api';
 
@@ -35,12 +35,7 @@ export function FeedsPage() {
     createMutation.mutate(trimmed);
   }
 
-  const createError =
-    createMutation.error instanceof ApiError
-      ? createMutation.error.message
-      : createMutation.isError
-        ? '등록에 실패했습니다'
-        : null;
+  const createError = errorText(createMutation.error, '등록에 실패했습니다');
 
   return (
     <section>

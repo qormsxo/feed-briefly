@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -50,68 +55,49 @@ export class ArticleIngestService {
   }
 
   private async ingest(userId?: string) {
-    // 일반 RSS 수집은 사용하지 않는다. 등록 API와 화면만 꺼 두었고,
-    // 이미 저장된 feeds는 IT/과학 테마를 고른 경우에만 아래 collectRegisteredTechFeeds에서 읽는다.
-    // const feeds = userId
-    //   ? await this.feeds.listByUser(userId)
-    //   : await this.feeds.listAll();
     const themeRows = userId
       ? await this.userThemes.listByUser(userId)
       : await this.userThemes.listAll();
 
+    if (userId && themeRows.length === 0) {
+      throw new BadRequestException('관심 분야를 하나 이상 골라 주세요');
+    }
+
+    const requestKeywords = userId
+      ? await this.userKeywords.listByUser(userId)
+      : null;
+
     const since = new Date(Date.now() - LOOKBACK_MS);
-    const saved: Article[] = [];
+    const collected = await this.collectPending(themeRows, since);
 
-    // for (const feed of feeds) {
-    //   let parsed: ParsedFeed;
-    //   try {
-    //     parsed = await this.rss.parse(feed.url);
-    //   } catch {
-    //     this.logger.warn(`피드 수집 실패 feedId=${feed.id}`);
-    //     continue;
-    //   }
-    //
-    //   const candidates = this.pickCandidates(parsed.items, since);
-    //   this.logger.log(
-    //     `피드 수집 url=${feed.url} candidates=${candidates.length}`,
-    //   );
-    //
-    //   for (const item of candidates) {
-    //     const duplicate = await this.articles.findOneBy({
-    //       feedId: feed.id,
-    //       link: item.link,
-    //     });
-    //     if (duplicate) {
-    //       continue;
-    //     }
-    //
-    //     const source =
-    //       item.contentSnippet || item.content || item.title || '';
-    //     let brief;
-    //     try {
-    //       brief = await this.gemini.summarize(item.title ?? '', source);
-    //     } catch {
-    //       this.logger.warn(`요약 실패 link=${item.link}`);
-    //       continue;
-    //     }
-    //
-    //     const article = await this.articles.save(
-    //       this.articles.create({
-    //         feedId: feed.id,
-    //         userId: feed.userId,
-    //         title: brief.title,
-    //         link: item.link,
-    //         summary: brief.summary,
-    //         interest: brief.interest,
-    //         publishedAt: this.resolvePublishedAt(item),
-    //         collectedAt: new Date(),
-    //       }),
-    //     );
-    //     saved.push(article);
-    //   }
-    // }
+    if (userId) {
+      this.assertCollected(
+        collected,
+        requestKeywords?.include.length ?? 0,
+        userId,
+      );
+    }
 
-    const rowsByUser = new Map<string, typeof themeRows>();
+    const saved = await this.summarizeAndSave(collected.pending);
+
+    if (userId && collected.pending.length > 0 && saved.length === 0) {
+      throw new ServiceUnavailableException(
+        '요약 서비스가 잠시 응답하지 않습니다. 잠시 후 다시 시도해 주세요',
+      );
+    }
+
+    this.logger.log(
+      `수집 완료 userId=${userId ?? 'all'} saved=${saved.length}`,
+    );
+
+    return saved;
+  }
+
+  private async collectPending(
+    themeRows: ThemeRow[],
+    since: Date,
+  ): Promise<Collected> {
+    const rowsByUser = new Map<string, ThemeRow[]>();
 
     for (const row of themeRows) {
       const rows = rowsByUser.get(row.userId) ?? [];
@@ -121,16 +107,12 @@ export class ArticleIngestService {
 
     const pending: PendingBrief[] = [];
     const seen = new Set<string>();
-    let matchedForRequestUser = 0;
-    let includeKeywordsForRequestUser = 0;
+    let fetched = 0;
+    let matched = 0;
 
     for (const rows of rowsByUser.values()) {
       const keywords = await this.userKeywords.listByUser(rows[0].userId);
       const quotas = briefsPerTheme(rows.length, MAX_BRIEFS_PER_USER);
-
-      if (userId && rows[0].userId === userId) {
-        includeKeywordsForRequestUser = keywords.include.length;
-      }
 
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
@@ -140,44 +122,16 @@ export class ArticleIngestService {
           continue;
         }
 
-        let pages: CollectedPage[];
+        const result = await this.collectTheme(row, keywords, room, since);
 
-        try {
-          pages = await this.collectThemePages(row.userId, row.theme, since);
-        } catch {
-          this.logger.warn(`뉴스 테마 수집 실패 theme=${row.theme}`);
+        if (!result) {
           continue;
         }
 
-        const fresh: CollectedPage[] = [];
+        fetched += result.fetched;
+        matched += result.matched;
 
-        for (const page of pages) {
-          const duplicate = await this.articles.findOneBy({
-            userId: row.userId,
-            link: page.link,
-          });
-
-          if (!duplicate) {
-            fresh.push(page);
-          }
-        }
-
-        const matched = filterByKeywords(
-          fresh,
-          keywords.include,
-          keywords.exclude,
-        );
-
-        if (userId && row.userId === userId) {
-          matchedForRequestUser += matched.length;
-        }
-
-        const picked = await this.pickInteresting(row.theme, matched, room);
-        this.logger.log(
-          `뉴스 테마 수집 theme=${row.theme} candidates=${fresh.length} matched=${matched.length} quota=${room} picked=${picked.length}`,
-        );
-
-        for (const page of picked) {
+        for (const page of result.picked) {
           const key = `${row.userId}\0${page.link}`;
 
           if (seen.has(key)) {
@@ -190,64 +144,126 @@ export class ArticleIngestService {
       }
     }
 
+    return { pending, fetched, matched };
+  }
+
+  private async collectTheme(
+    row: ThemeRow,
+    keywords: UserKeywordList,
+    room: number,
+    since: Date,
+  ) {
+    let pages: CollectedPage[];
+
+    try {
+      pages = await this.collectThemePages(row.userId, row.theme, since);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`뉴스 테마 수집 실패 theme=${row.theme} reason=${reason}`);
+
+      return null;
+    }
+
+    const fresh: CollectedPage[] = [];
+
+    for (const page of pages) {
+      const duplicate = await this.articles.findOneBy({
+        userId: row.userId,
+        link: page.link,
+      });
+
+      if (!duplicate) {
+        fresh.push(page);
+      }
+    }
+
+    const matched = filterByKeywords(fresh, keywords.include, keywords.exclude);
+    const picked = await this.pickInteresting(row.theme, matched, room);
+
+    this.logger.log(
+      `뉴스 테마 수집 theme=${row.theme} candidates=${fresh.length} matched=${matched.length} quota=${room} picked=${picked.length}`,
+    );
+
+    return { fetched: pages.length, matched: matched.length, picked };
+  }
+
+  /** 유저가 직접 누른 수집이 빈손이면 성공 0건 대신 화면에 보여 줄 에러로 올린다. */
+  private assertCollected(
+    collected: Collected,
+    includeKeywordCount: number,
+    userId: string,
+  ) {
+    if (collected.fetched === 0) {
+      this.logger.warn(`수집된 뉴스 없음 userId=${userId}`);
+
+      throw new BadRequestException(
+        '뉴스를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요',
+      );
+    }
+
     if (
-      userId &&
-      includeKeywordsForRequestUser > 0 &&
-      matchedForRequestUser === 0
+      includeKeywordCount > 0 &&
+      (collected.matched === 0 || collected.pending.length === 0)
     ) {
+      this.logger.warn(
+        `키워드 매칭 없음 userId=${userId} include=${includeKeywordCount} matched=${collected.matched} pending=${collected.pending.length}`,
+      );
+
       throw new BadRequestException(
         '지난 24시간 동안의 뉴스에서 선택한 카테고리에 입력한 키워드가 담긴 항목을 찾을 수 없습니다',
       );
     }
+  }
 
-    if (pending.length > 0) {
-      let briefs: (ArticleBrief | null)[] | null = null;
-
-      try {
-        briefs = await this.gemini.summarizeMany(
-          pending.map((item) => ({
-            title: item.page.title,
-            source: item.page.text,
-          })),
-        );
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`요약 실패 count=${pending.length} reason=${reason}`);
-      }
-
-      if (briefs) {
-        for (let index = 0; index < pending.length; index += 1) {
-          const brief = briefs[index];
-          const item = pending[index];
-
-          if (!brief) {
-            this.logger.warn(`요약 누락 link=${item.page.link}`);
-            continue;
-          }
-
-          const article = await this.articles.save(
-            this.articles.create({
-              feedId: item.page.feedId,
-              crawlSourceId: null,
-              theme: item.theme,
-              userId: item.userId,
-              title: brief.title,
-              link: item.page.link,
-              summary: brief.summary,
-              interest: brief.interest,
-              publishedAt: item.page.publishedAt,
-              collectedAt: new Date(),
-            }),
-          );
-
-          saved.push(article);
-        }
-      }
+  private async summarizeAndSave(pending: PendingBrief[]): Promise<Article[]> {
+    if (pending.length === 0) {
+      return [];
     }
 
-    this.logger.log(
-      `수집 완료 userId=${userId ?? 'all'} saved=${saved.length}`,
-    );
+    let briefs: (ArticleBrief | null)[];
+
+    try {
+      briefs = await this.gemini.summarizeMany(
+        pending.map((item) => ({
+          title: item.page.title,
+          source: item.page.text,
+        })),
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`요약 실패 count=${pending.length} reason=${reason}`);
+
+      return [];
+    }
+
+    const saved: Article[] = [];
+
+    for (let index = 0; index < pending.length; index += 1) {
+      const brief = briefs[index];
+      const item = pending[index];
+
+      if (!brief) {
+        this.logger.warn(`요약 누락 link=${item.page.link}`);
+        continue;
+      }
+
+      const article = await this.articles.save(
+        this.articles.create({
+          feedId: item.page.feedId,
+          crawlSourceId: null,
+          theme: item.theme,
+          userId: item.userId,
+          title: brief.title,
+          link: item.page.link,
+          summary: brief.summary,
+          interest: brief.interest,
+          publishedAt: item.page.publishedAt,
+          collectedAt: new Date(),
+        }),
+      );
+
+      saved.push(article);
+    }
 
     return saved;
   }
@@ -269,6 +285,7 @@ export class ArticleIngestService {
     return [...pages, ...registered];
   }
 
+  // 일반 RSS 수집은 쓰지 않는다. 이미 저장된 feeds만 IT/과학 테마에서 읽는다.
   private async collectRegisteredTechFeeds(
     userId: string,
     since: Date,
@@ -390,6 +407,16 @@ type PendingBrief = {
   userId: string;
   theme: string;
 };
+
+type Collected = {
+  pending: PendingBrief[];
+  fetched: number;
+  matched: number;
+};
+
+type ThemeRow = Awaited<ReturnType<UserThemesService['listAll']>>[number];
+
+type UserKeywordList = Awaited<ReturnType<UserKeywordsService['listByUser']>>;
 
 export function briefsPerTheme(themeCount: number, maxBriefs: number) {
   if (themeCount <= 0 || maxBriefs <= 0) {

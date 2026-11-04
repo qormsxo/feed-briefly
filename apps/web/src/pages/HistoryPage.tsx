@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ingestArticles, listArticles } from '../articles/api';
-import { ApiError } from '../lib/http';
+import { errorText } from '../lib/http';
 import { queryClient } from '../lib/query-client';
 import {
   listKeywords,
@@ -10,6 +10,15 @@ import {
   saveThemes,
   type UserKeywords,
 } from '../themes/api';
+
+const KEYWORD_FIELDS: {
+  kind: keyof UserKeywords;
+  label: string;
+  hint: string;
+}[] = [
+  { kind: 'include', label: '포함', hint: '포함할 키워드' },
+  { kind: 'exclude', label: '제외', hint: '제외할 키워드' },
+];
 
 export function HistoryPage() {
   const [page, setPage] = useState(1);
@@ -48,31 +57,22 @@ export function HistoryPage() {
   const items = history.data?.items ?? [];
   const ingestResult = ingestMutation.data;
 
-  const saveError =
-    saveMutation.error instanceof ApiError
-      ? saveMutation.error.message
-      : saveMutation.isError
-        ? '저장에 실패했습니다'
-        : null;
+  const saveError = errorText(saveMutation.error, '저장에 실패했습니다');
 
-  const keywordError =
-    keywordMutation.error instanceof ApiError
-      ? keywordMutation.error.message
-      : keywordMutation.isError
-        ? '키워드 저장에 실패했습니다'
-        : null;
+  const keywordError = errorText(
+    keywordMutation.error,
+    '키워드 저장에 실패했습니다',
+  );
 
-  const ingestError =
-    ingestMutation.error instanceof ApiError
-      ? ingestMutation.error.message
-      : ingestMutation.isError
-        ? '수집에 실패했습니다'
-        : null;
+  const ingestError = errorText(ingestMutation.error, '수집에 실패했습니다');
 
   const keywordValue = keywords.data ?? { include: [], exclude: [] };
 
-  function changeKeywords(next: UserKeywords) {
-    keywordMutation.mutate(next);
+  function editKeywords(
+    kind: keyof UserKeywords,
+    edit: (words: string[]) => string[],
+  ) {
+    keywordMutation.mutate({ ...keywordValue, [kind]: edit(keywordValue[kind]) });
   }
 
   function toggle(id: string) {
@@ -119,42 +119,23 @@ export function HistoryPage() {
           {saveError ? (
             <p className="mt-3 text-sm text-red-400">{saveError}</p>
           ) : null}
-          <KeywordField
-            label="포함"
-            hint="포함할 키워드"
-            words={keywordValue.include}
-            disabled={keywords.isLoading || keywordMutation.isPending}
-            onAdd={(words) =>
-              changeKeywords({
-                include: [...keywordValue.include, ...words],
-                exclude: keywordValue.exclude,
-              })
-            }
-            onRemove={(word) =>
-              changeKeywords({
-                include: keywordValue.include.filter((item) => item !== word),
-                exclude: keywordValue.exclude,
-              })
-            }
-          />
-          <KeywordField
-            label="제외"
-            hint="제외할 키워드"
-            words={keywordValue.exclude}
-            disabled={keywords.isLoading || keywordMutation.isPending}
-            onAdd={(words) =>
-              changeKeywords({
-                include: keywordValue.include,
-                exclude: [...keywordValue.exclude, ...words],
-              })
-            }
-            onRemove={(word) =>
-              changeKeywords({
-                include: keywordValue.include,
-                exclude: keywordValue.exclude.filter((item) => item !== word),
-              })
-            }
-          />
+          {KEYWORD_FIELDS.map((field) => (
+            <KeywordField
+              key={field.kind}
+              label={field.label}
+              hint={field.hint}
+              words={keywordValue[field.kind]}
+              disabled={keywords.isLoading || keywordMutation.isPending}
+              onAdd={(words) =>
+                editKeywords(field.kind, (current) => [...current, ...words])
+              }
+              onRemove={(word) =>
+                editKeywords(field.kind, (current) =>
+                  current.filter((item) => item !== word),
+                )
+              }
+            />
+          ))}
           {keywordError ? (
             <p className="mt-3 text-sm text-red-400">{keywordError}</p>
           ) : null}
@@ -166,9 +147,16 @@ export function HistoryPage() {
         </div>
         <button
           type="button"
-          disabled={ingestMutation.isPending}
+          disabled={
+            ingestMutation.isPending ||
+            keywordMutation.isPending ||
+            selected.size === 0
+          }
           className="h-9 shrink-0 rounded-lg bg-teal-500 px-3.5 text-[13px] font-medium text-black disabled:opacity-50"
-          onClick={() => ingestMutation.mutate()}
+          onClick={() => {
+            ingestMutation.reset();
+            ingestMutation.mutate();
+          }}
         >
           {ingestMutation.isPending ? '수집 중' : '지금 수집'}
         </button>
@@ -186,7 +174,7 @@ export function HistoryPage() {
       {ingestError && !ingestMutation.isPending ? (
         <p className="mt-6 text-sm text-red-400">{ingestError}</p>
       ) : null}
-      {ingestResult && !ingestMutation.isPending ? (
+      {ingestResult && !ingestMutation.isPending && !ingestError ? (
         <p className="mt-6 text-sm text-zinc-300">
           새로 요약 {ingestResult.count}건, 카카오톡 {ingestResult.sent}건
           {ingestResult.kakaoError ? ` (발송 실패: ${ingestResult.kakaoError})` : ''}

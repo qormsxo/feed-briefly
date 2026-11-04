@@ -53,6 +53,14 @@ export class ApiError extends Error {
   }
 }
 
+export function errorText(error: Error | null, fallback: string): string | null {
+  if (!error) {
+    return null;
+  }
+
+  return error instanceof ApiError ? error.message : fallback;
+}
+
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,

@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CircuitBreaker } from '../common/circuit-breaker';
 import { isNumber, isPlainRecord, isString } from '../common/parse';
 import { isDailyQuotaError, withRetry } from '../common/retry';
 
@@ -24,6 +25,7 @@ export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
   private readonly client: GoogleGenerativeAI;
   private readonly modelName: string;
+  private readonly circuit = new CircuitBreaker('Gemini');
 
   constructor(config: ConfigService) {
     this.client = new GoogleGenerativeAI(config.getOrThrow('GEMINI_API_KEY'));
@@ -65,10 +67,12 @@ export class GeminiService {
       blocks.join('\n\n'),
     ].join('\n');
 
-    const result = await withRetry(
-      `Gemini 요약 count=${items.length}`,
-      () => model.generateContent(prompt),
-      { logger: this.logger, retryOn: (error) => !isDailyQuotaError(error) },
+    const result = await this.circuit.exec(() =>
+      withRetry(
+        `Gemini 요약 count=${items.length}`,
+        () => model.generateContent(prompt),
+        { logger: this.logger, retryOn: (error) => !isDailyQuotaError(error) },
+      ),
     );
 
     const text = result.response.text().trim();
@@ -110,10 +114,12 @@ export class GeminiService {
       lines.join('\n\n'),
     ].join('\n');
 
-    const result = await withRetry(
-      `Gemini 흥미 순위 count=${items.length}`,
-      () => model.generateContent(prompt),
-      { logger: this.logger, retryOn: (error) => !isDailyQuotaError(error) },
+    const result = await this.circuit.exec(() =>
+      withRetry(
+        `Gemini 흥미 순위 count=${items.length}`,
+        () => model.generateContent(prompt),
+        { logger: this.logger, retryOn: (error) => !isDailyQuotaError(error) },
+      ),
     );
 
     const text = result.response.text().trim();
