@@ -201,6 +201,7 @@ export function HistoryPage() {
         <p className="mt-6 text-sm text-zinc-300">
           새로 요약 {ingestResult.count}건, 카카오톡 {ingestResult.sent}건
           {ingestResult.kakaoError ? ` (발송 실패: ${ingestResult.kakaoError})` : ''}
+          {ingestResult.kakaoSkipped ? ' (개발 환경이라 발송 안 함)' : ''}
         </p>
       ) : null}
 

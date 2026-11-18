@@ -43,6 +43,7 @@ export class ArticlesController {
       count: articles.length,
       sent: kakao.sent,
       kakaoError: kakao.error ?? null,
+      kakaoSkipped: kakao.skipped ?? false,
     };
   }
 }

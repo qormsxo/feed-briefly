@@ -6,6 +6,7 @@ import { Article } from '../articles/article.entity';
 import { ArticleIngestService } from '../articles/article-ingest.service';
 import { ArticlesService } from '../articles/articles.service';
 import { KakaoTalkService, KakaoTextTemplate } from '../kakao/kakao-talk.service';
+import { isProduction } from '../config/env.validation';
 import { UsersService } from '../users/users.service';
 import { DigestLog } from './digest-log.entity';
 import { buildKakaoText, sortByInterest } from './kakao-text';
@@ -57,6 +58,15 @@ export class DigestService {
 
     if (unsent.length === 0) {
       return { sent: 0 };
+    }
+
+    if (!isProduction(this.config.get('NODE_ENV'))) {
+      // 개발 중에는 내 카톡으로 테스트 메시지가 쏟아지지 않게 발송을 건너뛴다. 미발송 상태로 남는다.
+      this.logger.log(
+        `카카오 발송 건너뜀(개발 환경) userId=${userId} count=${unsent.length}`,
+      );
+
+      return { sent: 0, skipped: true };
     }
 
     const outgoing = sortByInterest(unsent);
