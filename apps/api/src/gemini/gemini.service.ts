@@ -1,9 +1,27 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  FunctionCallingMode,
+  FunctionCall,
+  GoogleGenerativeAI,
+  Part,
+} from '@google/generative-ai';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CircuitBreaker } from '../common/circuit-breaker';
 import { isNumber, isPlainRecord, isString } from '../common/parse';
 import { isDailyQuotaError, withRetry } from '../common/retry';
+import {
+  buildExpandSearchQueriesPrompt,
+  parseSearchQueries,
+} from './expand-search-queries';
+import {
+  buildSelectInterestingPrompt,
+  inspectCandidatePayload,
+  parseInspectIndex,
+  parseSelectIndices,
+  SELECT_INTERESTING_MAX_STEPS,
+  selectInterestingTool,
+  SelectInterestingCandidate,
+} from './select-interesting';
 
 /** gemini-3.8-flash 입력 한도. https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash */
 const MODEL_INPUT_TOKEN_LIMIT = 1_048_576;
@@ -132,6 +150,207 @@ export class GeminiService {
     return orderByInterestScores(scores);
   }
 
+  /** 관심 한 줄 + 테마 시드로 구글 뉴스 검색어를 만든다. */
+  async expandSearchQueries(
+    focus: string,
+    themeLabel: string,
+  ): Promise<string[]> {
+    const trimmed = focus.replace(/\s+/g, ' ').trim();
+
+    if (!trimmed) {
+      return [];
+    }
+
+    const model = this.client.getGenerativeModel({ model: this.modelName });
+    const prompt = buildExpandSearchQueriesPrompt(trimmed, themeLabel);
+
+    const result = await this.circuit.exec(() =>
+      withRetry(
+        `Gemini 검색어 확장 theme=${themeLabel}`,
+        () => model.generateContent(prompt),
+        { logger: this.logger, retryOn: (error) => !isDailyQuotaError(error) },
+      ),
+    );
+
+    const queries = parseSearchQueries(result.response.text().trim());
+
+    if (!queries) {
+      throw new Error('검색어 JSON 파싱 실패');
+    }
+
+    return queries;
+  }
+
+  /**
+   * 후보가 쿼터보다 많을 때 tool calling으로 고른다.
+   * inspect_candidate → select_briefs 루프. 실패 시 rankByInterest로 폴백.
+   */
+  async selectInteresting(
+    items: SelectInterestingCandidate[],
+    room: number,
+    theme?: string,
+    focus?: string,
+  ): Promise<number[]> {
+    if (items.length <= room) {
+      return items.map((_, index) => index);
+    }
+
+    if (room <= 0) {
+      return [];
+    }
+
+    try {
+      const selected = await this.runSelectInterestingAgent(
+        items,
+        room,
+        theme,
+        focus,
+      );
+
+      if (selected) {
+        return selected;
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `흥미 선택 에이전트 실패 theme=${theme ?? '-'} reason=${reason}`,
+      );
+    }
+
+    return this.rankByInterest(items);
+  }
+
+  private async runSelectInterestingAgent(
+    items: SelectInterestingCandidate[],
+    room: number,
+    theme?: string,
+    focus?: string,
+  ): Promise<number[] | null> {
+    const model = this.client.getGenerativeModel({
+      model: this.modelName,
+      tools: [selectInterestingTool],
+      toolConfig: {
+        functionCallingConfig: { mode: FunctionCallingMode.AUTO },
+      },
+    });
+
+    const chat = model.startChat();
+    const prompt = buildSelectInterestingPrompt(items, room, theme, focus);
+
+    let result = await this.circuit.exec(() =>
+      withRetry(
+        `Gemini 흥미 선택 start count=${items.length} room=${room}`,
+        () => chat.sendMessage(prompt),
+        { logger: this.logger, retryOn: (error) => !isDailyQuotaError(error) },
+      ),
+    );
+
+    for (let step = 0; step < SELECT_INTERESTING_MAX_STEPS; step += 1) {
+      const calls = result.response.functionCalls();
+
+      if (!calls || calls.length === 0) {
+        this.logger.warn(
+          `흥미 선택 도구 호출 없음 step=${step} theme=${theme ?? '-'}`,
+        );
+
+        return null;
+      }
+
+      const responseParts: Part[] = [];
+      let selected: number[] | null = null;
+
+      for (const call of calls) {
+        const handled = this.handleSelectInterestingCall(call, items, room);
+        responseParts.push(handled.part);
+
+        if (handled.selected) {
+          selected = handled.selected;
+        }
+      }
+
+      if (selected) {
+        return selected;
+      }
+
+      result = await this.circuit.exec(() =>
+        withRetry(
+          `Gemini 흥미 선택 step=${step + 1}`,
+          () => chat.sendMessage(responseParts),
+          {
+            logger: this.logger,
+            retryOn: (error) => !isDailyQuotaError(error),
+          },
+        ),
+      );
+    }
+
+    this.logger.warn(
+      `흥미 선택 스텝 초과 theme=${theme ?? '-'} max=${SELECT_INTERESTING_MAX_STEPS}`,
+    );
+
+    return null;
+  }
+
+  private handleSelectInterestingCall(
+    call: FunctionCall,
+    items: SelectInterestingCandidate[],
+    room: number,
+  ): { part: Part; selected: number[] | null } {
+    if (call.name === 'inspect_candidate') {
+      const parsed = parseInspectIndex(call.args, items.length);
+
+      if (!parsed.ok) {
+        return {
+          part: functionResponsePart(call.name, { error: parsed.error }),
+          selected: null,
+        };
+      }
+
+      return {
+        part: functionResponsePart(
+          call.name,
+          inspectCandidatePayload(items[parsed.index], parsed.index),
+        ),
+        selected: null,
+      };
+    }
+
+    if (call.name === 'select_briefs') {
+      const parsed = parseSelectIndices(call.args, items.length, room);
+
+      if (!parsed.ok) {
+        return {
+          part: functionResponsePart(call.name, { error: parsed.error }),
+          selected: null,
+        };
+      }
+
+      return {
+        part: functionResponsePart(call.name, {
+          ok: true,
+          indices: parsed.indices,
+        }),
+        selected: parsed.indices,
+      };
+    }
+
+    return {
+      part: functionResponsePart(call.name, {
+        error: `알 수 없는 도구: ${call.name}`,
+      }),
+      selected: null,
+    };
+  }
+
+}
+
+function functionResponsePart(name: string, response: object): Part {
+  return {
+    functionResponse: {
+      name,
+      response,
+    },
+  };
 }
 
 export function parseSummaries(
