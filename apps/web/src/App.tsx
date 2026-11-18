@@ -3,8 +3,6 @@ import { RequireAuth } from './auth/RequireAuth';
 import { AppLayout } from './layout/AppLayout';
 import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { HistoryPage } from './pages/HistoryPage';
-// RSS 피드 화면은 잠시 비활성화. 다시 켤 때 import와 아래 라우트 주석을 푼다.
-// import { FeedsPage } from './pages/FeedsPage';
 import { LoginPage } from './pages/LoginPage';
 
 export function App() {
@@ -17,7 +15,6 @@ export function App() {
           <Route path="/" element={<HistoryPage />} />
           <Route path="/themes" element={<Navigate to="/" replace />} />
           <Route path="/history" element={<Navigate to="/" replace />} />
-          {/* <Route path="/feeds" element={<FeedsPage />} /> */}
         </Route>
       </Route>
     </Routes>

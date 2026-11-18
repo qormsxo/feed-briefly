@@ -157,6 +157,21 @@ function firstHttpUrl(text: string) {
   return url.length > 'https://'.length ? url : null;
 }
 
+/** v.daum.net/v/20261118070214667 의 앞 14자리는 KST 등록 시각이다. 본문에 날짜 메타가 없을 때 쓴다. */
+export function daumDateFromUrl(url: string): Date | null {
+  const stamp = url.match(DAUM_ARTICLE)?.[1];
+
+  if (!stamp || stamp.length < 14) {
+    return null;
+  }
+
+  const [, y, mo, d, h, mi, s] =
+    stamp.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/) ?? [];
+  const date = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}+09:00`);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export function extractNewsArticle(html: string, pageUrl: string) {
   const $ = load(html);
   $('script, style, nav, footer, noscript, iframe, svg').remove();
@@ -173,7 +188,7 @@ export function extractNewsArticle(html: string, pageUrl: string) {
     $('meta[property="og:article:published_time"]').attr('content') ||
     $('span.num_date, .info_view span, time[datetime]').attr('datetime');
 
-  let publishedAt: Date | null = null;
+  let publishedAt: Date | null = daumDateFromUrl(pageUrl);
 
   if (publishedRaw) {
     const date = new Date(publishedRaw);

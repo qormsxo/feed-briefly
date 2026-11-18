@@ -13,7 +13,7 @@ import {
   extractNewsArticle,
   extractNewsListingLinks,
 } from './news-extract';
-import { getNewsTheme } from './news-themes';
+import { daumNewsSearch, getNewsTheme } from './news-themes';
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -22,6 +22,12 @@ const MAX_BODY_BYTES = 1_500_000;
 const LISTING_LINK_LIMIT = 12;
 
 const PER_LISTING = 2;
+
+/** 관심 키워드 검색은 목록 하나에서 더 많이 읽는다. 본문에 키워드가 없는 글은 뒤에서 걸러진다. */
+const PER_KEYWORD_LISTING = 10;
+
+/** 다음 검색 한 쪽에는 다음뉴스 링크가 2~4개뿐이라, 하루치(최대 12건)를 채우려면 5쪽까지 본다. */
+const KEYWORD_SEARCH_PAGES = 5;
 
 const MAX_ITEMS = 4;
 
@@ -75,10 +81,37 @@ export class HtmlCrawlerService {
       return [];
     }
 
+    return this.collectFromListings(theme.listings, since, themeId);
+  }
+
+  /** 관심 키워드마다 다음 뉴스 검색(최신순)을 읽는다. */
+  async collectKeywordArticles(
+    keywords: string[],
+    since: Date,
+  ): Promise<CrawledPage[]> {
+    const listings = keywords.flatMap((keyword) =>
+      Array.from({ length: KEYWORD_SEARCH_PAGES }, (_, index) =>
+        daumNewsSearch(keyword, index + 1),
+      ),
+    );
+
+    // 키워드 기사는 오래된 글로 채우지 않는다. 24시간 안에 없으면 0건이 정상이다.
+    return this.collectFromListings(listings, since, 'keyword', {
+      perListing: PER_KEYWORD_LISTING,
+      onlyRecent: true,
+    });
+  }
+
+  private async collectFromListings(
+    listings: string[],
+    since: Date,
+    label: string,
+    { perListing = PER_LISTING, onlyRecent = false } = {},
+  ): Promise<CrawledPage[]> {
     const seen = new Set<string>();
     const buckets: string[][] = [];
 
-    for (const listing of theme.listings) {
+    for (const listing of listings) {
       try {
         const found = await this.listArticles(listing);
         const bucket: string[] = [];
@@ -91,7 +124,7 @@ export class HtmlCrawlerService {
           seen.add(link);
           bucket.push(link);
 
-          if (bucket.length >= PER_LISTING) {
+          if (bucket.length >= perListing) {
             break;
           }
         }
@@ -100,13 +133,13 @@ export class HtmlCrawlerService {
           buckets.push(bucket);
         }
       } catch {
-        this.logger.warn(`뉴스 목록 실패 theme=${themeId} url=${listing}`);
+        this.logger.warn(`뉴스 목록 실패 label=${label} url=${listing}`);
       }
     }
 
     const links = takeRoundRobin(
       buckets,
-      PER_LISTING,
+      perListing,
       buckets.reduce((count, bucket) => count + bucket.length, 0),
     );
 
@@ -126,6 +159,12 @@ export class HtmlCrawlerService {
       }
 
       await sleep(FETCH_GAP_MS);
+    }
+
+    if (onlyRecent) {
+      return collected.filter(
+        (page) => page.publishedAt !== null && page.publishedAt >= since,
+      );
     }
 
     return this.pickRecent(collected, since, collected.length);

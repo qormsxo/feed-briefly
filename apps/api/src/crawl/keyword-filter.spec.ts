@@ -1,4 +1,8 @@
-import { filterByKeywords, normalizeKeyword } from './keyword-filter';
+import {
+  filterByKeywords,
+  focusKeywords,
+  normalizeKeyword,
+} from './keyword-filter';
 
 describe('키워드 거름', () => {
   const pages = [
@@ -27,5 +31,13 @@ describe('키워드 거름', () => {
 
   it('제외가 포함보다 먼저다', () => {
     expect(filterByKeywords(pages, ['운세'], ['운세'])).toEqual([]);
+  });
+});
+
+describe('관심 키워드', () => {
+  it('splits by comma, normalizes, dedupes and caps at five', () => {
+    expect(focusKeywords(' 카리나 , 엔비디아,카리나, a ,')).toEqual(['카리나', '엔비디아']);
+    expect(focusKeywords('a1,b2,c3,d4,e5,f6')).toHaveLength(5);
+    expect(focusKeywords('')).toEqual([]);
   });
 });

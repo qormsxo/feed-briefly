@@ -15,13 +15,13 @@ export class UserKeywordsController {
   constructor(private readonly keywords: UserKeywordsService) {}
 
   @Get()
-  @ApiOperation({ summary: '포함할 말과 뺄 말' })
+  @ApiOperation({ summary: '관심 한 줄과 제외 키워드' })
   list(@CurrentUser() user: AuthUser) {
     return this.keywords.getForUser(user.id);
   }
 
   @Put()
-  @ApiOperation({ summary: '포함할 말과 뺄 말 저장' })
+  @ApiOperation({ summary: '관심 한 줄과 제외 키워드 저장' })
   replace(@CurrentUser() user: AuthUser, @Body() dto: UpdateUserKeywordsDto) {
     return this.keywords.replace(user.id, dto);
   }

@@ -1,17 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { RssModule } from '../rss/rss.module';
 import { Feed } from './feed.entity';
 import { FeedsService } from './feeds.service';
 
-// RSS 등록 API는 잠시 사용하지 않는다.
-// 다시 켤 때는 FeedsController를 import해서 controllers에 넣는다.
-// import { FeedsController } from './feeds.controller';
-
+// RSS 등록 API·UI는 제거했다. Feed 테이블은 예전 article.feedId FK용으로만 남긴다.
 @Module({
-  imports: [TypeOrmModule.forFeature([Feed]), RssModule],
-  controllers: [],
+  imports: [TypeOrmModule.forFeature([Feed])],
   providers: [FeedsService],
-  exports: [FeedsService],
+  exports: [FeedsService, TypeOrmModule],
 })
 export class FeedsModule {}

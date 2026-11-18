@@ -10,26 +10,18 @@ import {
   CrawledPage,
   HtmlCrawlerService,
 } from '../crawl/html-crawler.service';
-import { TECH_THEME_ID } from '../crawl/news-themes';
-import { filterByKeywords } from '../crawl/keyword-filter';
+import { filterByKeywords, focusKeywords } from '../crawl/keyword-filter';
+import { FOCUS_THEME_ID } from '../crawl/news-themes';
 import { UserKeywordsService } from '../crawl/user-keywords.service';
 import { UserThemesService } from '../crawl/user-themes.service';
-import { FeedsService } from '../feeds/feeds.service';
+import { summaryCharBudget } from '../digest/kakao-text';
 import { ArticleBrief, GeminiService } from '../gemini/gemini.service';
-import { ParsedFeed, RssParserService } from '../rss/rss-parser.service';
 import { Article } from './article.entity';
 
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
-const MAX_ITEMS_PER_FEED = 5;
-
-const FALLBACK_ITEMS_PER_FEED = 3;
-
 const MAX_BRIEFS_PER_USER = 12;
 
-const LINKS_PER_REGISTERED_FEED = 2;
-
-const REGISTERED_FEED_MIN_CHARS = 180;
 
 @Injectable()
 export class ArticleIngestService {
@@ -38,11 +30,9 @@ export class ArticleIngestService {
   constructor(
     @InjectRepository(Article)
     private readonly articles: Repository<Article>,
-    private readonly feeds: FeedsService,
     private readonly userThemes: UserThemesService,
     private readonly userKeywords: UserKeywordsService,
     private readonly crawler: HtmlCrawlerService,
-    private readonly rss: RssParserService,
     private readonly gemini: GeminiService,
   ) {}
 
@@ -63,19 +53,11 @@ export class ArticleIngestService {
       throw new BadRequestException('관심 분야를 하나 이상 골라 주세요');
     }
 
-    const requestKeywords = userId
-      ? await this.userKeywords.listByUser(userId)
-      : null;
-
     const since = new Date(Date.now() - LOOKBACK_MS);
     const collected = await this.collectPending(themeRows, since);
 
     if (userId) {
-      this.assertCollected(
-        collected,
-        requestKeywords?.include.length ?? 0,
-        userId,
-      );
+      this.assertCollected(collected, userId);
     }
 
     const saved = await this.summarizeAndSave(collected.pending);
@@ -110,19 +92,67 @@ export class ArticleIngestService {
     let fetched = 0;
     let matched = 0;
 
+    const add = (
+      picked: CollectedPage[],
+      userId: string,
+      theme: string,
+      focus: string,
+    ) => {
+      let added = 0;
+
+      for (const page of picked) {
+        const key = `${userId}\0${page.link}`;
+
+        if (seen.has(key)) {
+          continue;
+        }
+
+        seen.add(key);
+        pending.push({ page, userId, theme, focus });
+        added += 1;
+      }
+
+      return added;
+    };
+
     for (const rows of rowsByUser.values()) {
-      const keywords = await this.userKeywords.listByUser(rows[0].userId);
-      const quotas = briefsPerTheme(rows.length, MAX_BRIEFS_PER_USER);
+      const userId = rows[0].userId;
+      const preferences = await this.userKeywords.listByUser(userId);
+      const keywords = focusKeywords(preferences.focus);
+      let budget = MAX_BRIEFS_PER_USER;
+
+      if (keywords.length > 0) {
+        const focus = await this.collectFocus(
+          userId,
+          keywords,
+          preferences.exclude,
+          since,
+        );
+
+        if (focus) {
+          fetched += focus.fetched;
+          matched += focus.matched;
+          add(focus.picked, userId, FOCUS_THEME_ID, keywords.join(', '));
+
+          // 키워드를 적었으면 그 키워드 기사만 보낸다. 이미 보낸 기사뿐이어도 테마로 채우지 않는다.
+          // 24시간 안에 키워드 기사가 아예 없을 때만 고른 분야 기사로 대신한다.
+          if (focus.available > 0) {
+            budget = 0;
+          }
+        }
+      }
+
+      const quotas = briefsPerTheme(rows.length, budget);
 
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
-        const room = quotas[index];
+        const room = quotas[index] ?? 0;
 
         if (room <= 0) {
           continue;
         }
 
-        const result = await this.collectTheme(row, keywords, room, since);
+        const result = await this.collectTheme(row, preferences, room, since);
 
         if (!result) {
           continue;
@@ -130,17 +160,7 @@ export class ArticleIngestService {
 
         fetched += result.fetched;
         matched += result.matched;
-
-        for (const page of result.picked) {
-          const key = `${row.userId}\0${page.link}`;
-
-          if (seen.has(key)) {
-            continue;
-          }
-
-          seen.add(key);
-          pending.push({ page, userId: row.userId, theme: row.theme });
-        }
+        add(result.picked, userId, row.theme, '');
       }
     }
 
@@ -149,14 +169,15 @@ export class ArticleIngestService {
 
   private async collectTheme(
     row: ThemeRow,
-    keywords: UserKeywordList,
+    preferences: UserPreferences,
     room: number,
     since: Date,
   ) {
     let pages: CollectedPage[];
 
     try {
-      pages = await this.collectThemePages(row.userId, row.theme, since);
+      const portal = await this.crawler.collectThemeArticles(row.theme, since);
+      pages = portal.map((page) => ({ ...page, feedId: null }));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.logger.warn(`뉴스 테마 수집 실패 theme=${row.theme} reason=${reason}`);
@@ -164,20 +185,8 @@ export class ArticleIngestService {
       return null;
     }
 
-    const fresh: CollectedPage[] = [];
-
-    for (const page of pages) {
-      const duplicate = await this.articles.findOneBy({
-        userId: row.userId,
-        link: page.link,
-      });
-
-      if (!duplicate) {
-        fresh.push(page);
-      }
-    }
-
-    const matched = filterByKeywords(fresh, keywords.include, keywords.exclude);
+    const fresh = await this.dropKnown(row.userId, pages);
+    const matched = filterByKeywords(fresh, [], preferences.exclude);
     const picked = await this.pickInteresting(row.theme, matched, room);
 
     this.logger.log(
@@ -187,30 +196,78 @@ export class ArticleIngestService {
     return { fetched: pages.length, matched: matched.length, picked };
   }
 
-  /** 유저가 직접 누른 수집이 빈손이면 성공 0건 대신 화면에 보여 줄 에러로 올린다. */
-  private assertCollected(
-    collected: Collected,
-    includeKeywordCount: number,
+  /**
+   * 관심 키워드는 테마와 섞지 않고 사용자당 한 번, 키워드 그대로 다음 뉴스에서 검색한다.
+   * 본문·제목에 키워드가 실제로 들어간 글만 남긴다. available은 이미 보낸 글까지 포함한 24시간 내 키워드 기사 수다.
+   */
+  private async collectFocus(
     userId: string,
+    keywords: string[],
+    exclude: string[],
+    since: Date,
   ) {
+    let pages: CollectedPage[];
+
+    try {
+      const found = await this.crawler.collectKeywordArticles(keywords, since);
+      pages = found.map((page) => ({ ...page, feedId: null }));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`관심 키워드 수집 실패 userId=${userId} reason=${reason}`);
+
+      return null;
+    }
+
+    const available = filterByKeywords(pages, keywords, exclude).length;
+    const fresh = await this.dropKnown(userId, pages);
+    const matched = filterByKeywords(fresh, keywords, exclude);
+
+    if (matched.length === 0) {
+      // 24시간 안에 키워드 기사가 없는 날은 흔하다. 에러가 아니라 0건으로 넘기고 자리는 테마 기사에 준다.
+      this.logger.log(
+        `관심 키워드 기사 없음 keywords=${keywords.join('|')} candidates=${fresh.length}`,
+      );
+
+      return { fetched: pages.length, matched: 0, picked: [], available };
+    }
+
+    const picked = await this.pickInteresting(
+      FOCUS_THEME_ID,
+      matched,
+      MAX_BRIEFS_PER_USER,
+    );
+
+    this.logger.log(
+      `관심 키워드 수집 keywords=${keywords.join('|')} candidates=${fresh.length} matched=${matched.length} picked=${picked.length}`,
+    );
+
+    return { fetched: pages.length, matched: matched.length, picked, available };
+  }
+
+  private async dropKnown(userId: string, pages: CollectedPage[]) {
+    const fresh: CollectedPage[] = [];
+
+    for (const page of pages) {
+      const duplicate = await this.articles.findOneBy({
+        userId,
+        link: page.link,
+      });
+
+      if (!duplicate) {
+        fresh.push(page);
+      }
+    }
+
+    return fresh;
+  }
+
+  /** 유저가 직접 누른 수집이 빈손이면 성공 0건 대신 화면에 보여 줄 에러로 올린다. */
+  private assertCollected(collected: Collected, userId: string) {
     if (collected.fetched === 0) {
       this.logger.warn(`수집된 뉴스 없음 userId=${userId}`);
 
       throw new BadRequestException(
         '뉴스를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요',
-      );
-    }
-
-    if (
-      includeKeywordCount > 0 &&
-      (collected.matched === 0 || collected.pending.length === 0)
-    ) {
-      this.logger.warn(
-        `키워드 매칭 없음 userId=${userId} include=${includeKeywordCount} matched=${collected.matched} pending=${collected.pending.length}`,
-      );
-
-      throw new BadRequestException(
-        '지난 24시간 동안의 뉴스에서 선택한 카테고리에 입력한 키워드가 담긴 항목을 찾을 수 없습니다',
       );
     }
   }
@@ -227,6 +284,8 @@ export class ArticleIngestService {
         pending.map((item) => ({
           title: item.page.title,
           source: item.page.text,
+          budget: summaryCharBudget(item.page.link),
+          focus: item.focus || undefined,
         })),
       );
     } catch (error) {
@@ -268,81 +327,6 @@ export class ArticleIngestService {
     return saved;
   }
 
-  private async collectThemePages(
-    userId: string,
-    theme: string,
-    since: Date,
-  ): Promise<CollectedPage[]> {
-    const portal = await this.crawler.collectThemeArticles(theme, since);
-    const pages = portal.map((page) => ({ ...page, feedId: null }));
-
-    if (theme !== TECH_THEME_ID) {
-      return pages;
-    }
-
-    const registered = await this.collectRegisteredTechFeeds(userId, since);
-
-    return [...pages, ...registered];
-  }
-
-  // 일반 RSS 수집은 쓰지 않는다. 이미 저장된 feeds만 IT/과학 테마에서 읽는다.
-  private async collectRegisteredTechFeeds(
-    userId: string,
-    since: Date,
-  ): Promise<CollectedPage[]> {
-    const feeds = await this.feeds.listByUser(userId);
-    const pages: CollectedPage[] = [];
-
-    for (const feed of feeds) {
-      let parsed: ParsedFeed;
-
-      try {
-        parsed = await this.rss.parse(feed.url);
-      } catch {
-        this.logger.warn(`IT/과학 등록 피드 수집 실패 feedId=${feed.id}`);
-        continue;
-      }
-
-      const candidates = this.pickCandidates(parsed.items, since).slice(
-        0,
-        LINKS_PER_REGISTERED_FEED,
-      );
-
-      const links = candidates.flatMap((item) =>
-        item.link ? [item.link] : [],
-      );
-
-      const crawled = await this.crawler.collectArticlePages(links);
-      const crawledLinks = new Set(crawled.map((page) => page.sourceLink));
-
-      for (const page of crawled) {
-        pages.push({ ...page, feedId: feed.id });
-      }
-
-      for (const item of candidates) {
-        if (!item.link || crawledLinks.has(item.link)) {
-          continue;
-        }
-
-        const text = (item.contentSnippet || item.content || '').trim();
-
-        if (text.length < REGISTERED_FEED_MIN_CHARS) {
-          continue;
-        }
-
-        pages.push({
-          link: item.link,
-          title: item.title ?? feed.title ?? item.link,
-          text,
-          publishedAt: this.resolvePublishedAt(item),
-          feedId: feed.id,
-        });
-      }
-    }
-
-    return pages;
-  }
-
   private async pickInteresting<T extends { title: string; text: string }>(
     theme: string,
     pages: T[],
@@ -353,48 +337,19 @@ export class ArticleIngestService {
     }
 
     try {
-      const order = await this.gemini.rankByInterest(
+      const order = await this.gemini.selectInteresting(
         pages.map((page) => ({ title: page.title, lead: page.text })),
+        room,
+        theme,
       );
 
       return order.slice(0, room).map((index) => pages[index]).filter(Boolean);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`흥미 순위 실패 theme=${theme} reason=${reason}`);
+      this.logger.warn(`흥미 선택 실패 theme=${theme} reason=${reason}`);
 
       return pages.slice(0, room);
     }
-  }
-
-  private pickCandidates(
-    items: ParsedFeed['items'],
-    since: Date,
-  ): ParsedFeed['items'] {
-    const withLink = items.filter((item) => Boolean(item.link));
-
-    const recent = withLink.filter((item) => {
-      const publishedAt = this.resolvePublishedAt(item);
-
-      return !publishedAt || publishedAt >= since;
-    });
-
-    if (recent.length > 0) {
-      return recent.slice(0, MAX_ITEMS_PER_FEED);
-    }
-
-    return withLink.slice(0, FALLBACK_ITEMS_PER_FEED);
-  }
-
-  private resolvePublishedAt(item: ParsedFeed['items'][number]) {
-    const raw = item.isoDate ?? item.pubDate;
-
-    if (!raw) {
-      return null;
-    }
-
-    const date = new Date(raw);
-
-    return Number.isNaN(date.getTime()) ? null : date;
   }
 }
 
@@ -406,6 +361,7 @@ type PendingBrief = {
   page: CollectedPage;
   userId: string;
   theme: string;
+  focus: string;
 };
 
 type Collected = {
@@ -416,7 +372,7 @@ type Collected = {
 
 type ThemeRow = Awaited<ReturnType<UserThemesService['listAll']>>[number];
 
-type UserKeywordList = Awaited<ReturnType<UserKeywordsService['listByUser']>>;
+type UserPreferences = Awaited<ReturnType<UserKeywordsService['listByUser']>>;
 
 export function briefsPerTheme(themeCount: number, maxBriefs: number) {
   if (themeCount <= 0 || maxBriefs <= 0) {

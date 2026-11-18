@@ -30,7 +30,13 @@ export function listArticles(page: number, limit = 10) {
 }
 
 export function ingestArticles() {
-  return http<{ count: number; sent: number; kakaoError: string | null }>(
+  return http<{
+    count: number;
+    focusCount: number;
+    sent: number;
+    kakaoError: string | null;
+    kakaoSkipped: boolean;
+  }>(
     '/api/articles/ingest',
     { method: 'POST' },
   );

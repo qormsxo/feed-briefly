@@ -1,4 +1,5 @@
 import {
+  daumDateFromUrl,
   extractGoogleNewsRssLinks,
   extractNewsArticle,
   extractNewsListingLinks,
@@ -6,6 +7,13 @@ import {
 } from './news-extract';
 
 describe('news-extract', () => {
+  it('reads the KST timestamp embedded in a daum article url', () => {
+    expect(daumDateFromUrl('https://v.daum.net/v/20261118070214667')?.toISOString()).toBe(
+      '2026-11-17T22:02:14.000Z',
+    );
+    expect(daumDateFromUrl('https://n.news.naver.com/mnews/article/001/1')).toBeNull();
+  });
+
   it('normalizes daum and naver article urls', () => {
     expect(
       normalizeNewsLink('https://v.daum.net/v/20260921092541972?foo=1'),

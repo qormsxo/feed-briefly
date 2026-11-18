@@ -51,7 +51,7 @@ export class ArticlesService {
   async paginateByUser(userId: string, page: number, limit: number) {
     const [rows, total] = await this.articles.findAndCount({
       where: { userId },
-      relations: { feed: true, crawlSource: true },
+      relations: { feed: true },
       order: { collectedAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -69,13 +69,9 @@ export class ArticlesService {
           row.feed?.title ??
           (row.theme
             ? `네이버·다음·구글 · ${newsThemeLabel(row.theme)}`
-            : row.crawlSource
-              ? `${row.crawlSource.theme} · ${row.crawlSource.title ?? row.crawlSource.url}`
-              : null),
-        feedUrl: row.feed?.url ?? row.crawlSource?.url ?? row.link,
-        theme: row.theme
-          ? newsThemeLabel(row.theme)
-          : row.crawlSource?.theme ?? null,
+            : null),
+        feedUrl: row.feed?.url ?? row.link,
+        theme: row.theme ? newsThemeLabel(row.theme) : null,
       })),
       page,
       limit,

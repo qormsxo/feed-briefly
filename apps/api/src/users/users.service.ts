@@ -64,6 +64,18 @@ export class UsersService {
     return this.users.save(user);
   }
 
+  async setFocusNote(userId: string, focusNote: string | null) {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('사용자를 찾을 수 없습니다');
+    }
+
+    user.focusNote = focusNote;
+
+    return this.users.save(user);
+  }
+
   /** 기사·다이제스트 로그까지 지운 뒤 유저를 삭제한다. 테마·키워드·피드는 CASCADE. */
   async deleteAccount(userId: string) {
     const user = await this.findById(userId);

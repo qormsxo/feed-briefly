@@ -22,7 +22,7 @@ export function saveThemes(themeIds: string[]) {
 }
 
 export type UserKeywords = {
-  include: string[];
+  focus: string;
   exclude: string[];
 };
 

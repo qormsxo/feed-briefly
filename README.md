@@ -7,11 +7,10 @@
 ## 사용 방식
 
 1. 웹에서 카카오 로그인한다. `talk_message` 동의가 있어야 나에게 보내기가 동작한다.
-2. 테마 페이지에서 정치·경제·사회 같은 관심 분야를 고른다. 네이버·다음·구글 뉴스에서 글을 찾는다.
-3. 예전에 등록해 둔 RSS는 IT/과학 테마를 골랐을 때만 그 테마의 수집 사이트로 쓴다. RSS 등록 화면과 API는 코드에만 남아 있고 지금은 꺼 두었다.
-4. GitHub Actions 크론이 매일 아침 `POST /api/internal/run-digest`를 친다.
-5. 최근 24시간 글을 모아 요약한 뒤 카카오톡 feed 템플릿으로 보낸다.
-6. 웹 `/history`에서 과거 요약을 다시 볼 수 있다. `지금 수집`으로 크론을 기다리지 않고 고른 테마를 돌릴 수도 있다.
+2. 관심 분야(테마 시드)를 고르고, 필요하면 관심 한 줄을 적는다. 테마 목록 + 관심에서 만든 구글 뉴스 검색으로 글을 모은다. 제외 키워드만 하드 필터다.
+3. GitHub Actions 크론이 매일 아침 `POST /api/internal/run-digest`를 친다.
+4. 최근 24시간 글을 모아 요약한 뒤 카카오톡 **text** 템플릿으로 보낸다.
+5. 웹에서 과거 요약을 다시 볼 수 있다. `지금 수집`으로 크론을 기다리지 않고 고른 테마를 돌릴 수도 있다.
 
 ## 아키텍처
 
@@ -31,16 +30,16 @@ sequenceDiagram
   API->>PG: User upsert (토큰은 AES-256-GCM)
   API-->>Web: httpOnly JWT 쿠키, /auth/callback
 
-  User->>Web: 관심 테마 선택
-  Web->>API: PUT /api/themes
-  API->>PG: user_themes 저장
+  User->>Web: 관심 테마·한 줄 설정
+  Web->>API: PUT /api/themes, PUT /api/keywords
+  API->>PG: user_themes / focusNote 저장
 
   GHA->>API: POST /api/internal/run-digest (x-internal-secret)
-  API->>PG: 선택한 테마와 IT/과학용 기존 RSS 조회
-  API->>API: 최근 24시간 글 수집
-  API->>Gemini: 3줄 요약
+  API->>PG: 선택한 테마·관심 조회
+  API->>API: 테마 시드 + 검색 쿼리로 최근 24시간 글 수집
+  API->>Gemini: 선택(필요 시) · 3줄 요약
   API->>PG: Article 저장
-  API->>Kakao: 나에게 보내기 (feed 템플릿)
+  API->>Kakao: 나에게 보내기 (text 템플릿)
   API->>PG: DigestLog 성공/실패
 ```
 
@@ -93,6 +92,8 @@ docker compose up -d
 Neon을 쓰려면 [Neon](https://neon.tech)에서 프로젝트를 만들고 pooled connection string을 `DATABASE_URL`에 넣은 뒤 `DATABASE_SSL=true`로 둔다. 개발에선 TypeORM `synchronize`가 스키마를 만든다 (`NODE_ENV=production`이면 꺼진다).
 
 Upstash Redis는 현재 런타임 의존성이 없다. 나중에 수집 락·레이트 리밋이 필요하면 `REDIS_URL`을 붙이면 된다. 연결 방법은 [Upstash Redis](https://upstash.com) 콘솔의 REST/TCP URL을 복사하면 된다.
+
+RSS 등록 UI/API는 제거했다. `feeds` 테이블은 예전 기사 FK용으로만 남아 있다.
 
 ### 실행
 

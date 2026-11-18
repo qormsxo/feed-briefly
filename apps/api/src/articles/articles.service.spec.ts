@@ -21,7 +21,6 @@ describe('ArticlesService', () => {
           id: 'a2',
           feed: null,
           theme: 'politics',
-          crawlSource: null,
         },
       ],
       5,

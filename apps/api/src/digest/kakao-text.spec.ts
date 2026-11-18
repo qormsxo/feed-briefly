@@ -1,4 +1,10 @@
-import { buildKakaoText, KAKAO_TEXT_MAX, sortByInterest } from './kakao-text';
+import {
+  buildKakaoText,
+  KAKAO_TEXT_MAX,
+  KAKAO_TITLE_MAX,
+  sortByInterest,
+  summaryCharBudget,
+} from './kakao-text';
 
 describe('kakao-text', () => {
   it('orders highest interest first', () => {
@@ -24,5 +30,28 @@ describe('kakao-text', () => {
     expect(long.length).toBeLessThanOrEqual(KAKAO_TEXT_MAX);
     expect(long.startsWith('제목\n\n')).toBe(true);
     expect(long.endsWith(url)).toBe(true);
+  });
+
+  it('sizes the summary budget so title, summary and link fit without cutting', () => {
+    const url = 'https://n.news.naver.com/mnews/article/001/0012345678';
+    const budget = summaryCharBudget(url);
+    const text = buildKakaoText('가'.repeat(KAKAO_TITLE_MAX), '나'.repeat(budget), url);
+
+    expect(text.length).toBeLessThanOrEqual(KAKAO_TEXT_MAX);
+    expect(text).not.toContain('…');
+  });
+
+  it('clamps the summary budget for very long or missing links', () => {
+    expect(summaryCharBudget('https://example.com/' + 'a'.repeat(300))).toBe(40);
+    expect(summaryCharBudget('')).toBe(160);
+  });
+
+  it('drops trailing lines instead of cutting mid-sentence', () => {
+    const url = 'https://v.daum.net/v/20261117220942145';
+    const lines = ['가'.repeat(50), '나'.repeat(50), '→ ' + '다'.repeat(50)];
+    const text = buildKakaoText('제'.repeat(30), lines.join('\n'), url);
+
+    expect(text.length).toBeLessThanOrEqual(KAKAO_TEXT_MAX);
+    expect(text).toBe(`${'제'.repeat(30)}\n\n${lines[0]}\n${lines[1]}\n\n${url}`);
   });
 });

@@ -29,6 +29,10 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   kakaoTokenExpiresAt: Date | null;
 
+  /** 관심 한 줄. 검색 쿼리 시드로 쓴다. */
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  focusNote: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
