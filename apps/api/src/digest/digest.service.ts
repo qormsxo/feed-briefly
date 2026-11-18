@@ -61,12 +61,16 @@ export class DigestService {
 
     const outgoing = sortByInterest(unsent);
 
+    let sent = 0;
+
     try {
       for (const article of outgoing) {
         await this.talk.sendMemoToMe(user, this.buildText(article));
+        // 한 건씩 표시해야 중간에 실패해도 다음 실행에서 이미 보낸 글을 다시 보내지 않는다.
+        await this.articles.markKakaoSent([article.id]);
+        sent += 1;
       }
 
-      await this.articles.markKakaoSent(unsent.map((article) => article.id));
       await this.logs.save(
         this.logs.create({
           userId,
@@ -76,7 +80,7 @@ export class DigestService {
         }),
       );
 
-      return { sent: outgoing.length };
+      return { sent };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';
       this.logger.warn(`브리핑 발송 실패 userId=${userId} reason=${message}`);
@@ -84,12 +88,12 @@ export class DigestService {
         this.logs.create({
           userId,
           status: 'failure',
-          articleCount: outgoing.length,
-          errorMessage: message,
+          articleCount: sent,
+          errorMessage: `${sent}/${outgoing.length}건 발송 후 실패: ${message}`,
         }),
       );
 
-      return { sent: 0, error: message };
+      return { sent, error: message };
     }
   }
 
