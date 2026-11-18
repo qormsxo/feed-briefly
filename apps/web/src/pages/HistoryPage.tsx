@@ -136,12 +136,12 @@ export function HistoryPage() {
               saveFocus();
             }}
           >
-            <span className="text-[12px] text-zinc-300">관심</span>
+            <span className="text-[12px] text-zinc-300">관심 키워드</span>
             <input
               value={focusDraft}
               disabled={keywords.isLoading || keywordMutation.isPending}
               maxLength={120}
-              placeholder="예: 반도체 수출과 금리"
+              placeholder="예: 카리나, 엔비디아 (쉼표로 구분)"
               className="h-8 min-w-[14rem] flex-1 rounded-lg bg-zinc-900 px-2.5 text-[13px] text-zinc-100 ring-1 ring-zinc-700 outline-none placeholder:text-zinc-400 disabled:opacity-60"
               onChange={(event) => setFocusDraft(event.target.value)}
               onBlur={saveFocus}
@@ -164,7 +164,7 @@ export function HistoryPage() {
           ) : null}
           {selected.size === 0 && themes.data ? (
             <p className="mt-3 text-[13px] text-zinc-300">
-              분야는 시드입니다. 하나 이상 고르고, 관심 한 줄로 검색을 좁힙니다.
+              분야를 하나 이상 고르세요. 관심 키워드를 적으면 그 키워드 기사만 받고, 24시간 안에 없을 때만 고른 분야 기사로 대신합니다.
             </p>
           ) : null}
         </div>
@@ -199,7 +199,13 @@ export function HistoryPage() {
       ) : null}
       {ingestResult && !ingestMutation.isPending && !ingestError ? (
         <p className="mt-6 text-sm text-zinc-300">
-          새로 요약 {ingestResult.count}건, 카카오톡 {ingestResult.sent}건
+          새로 요약 {ingestResult.count}건
+          {keywordValue.focus.trim() &&
+          ingestResult.count > 0 &&
+          ingestResult.focusCount === 0
+            ? ' (최근 24시간 관심 키워드 기사가 없어 분야 기사로 대신함)'
+            : ''}
+          , 카카오톡 {ingestResult.sent}건
           {ingestResult.kakaoError ? ` (발송 실패: ${ingestResult.kakaoError})` : ''}
           {ingestResult.kakaoSkipped ? ' (개발 환경이라 발송 안 함)' : ''}
         </p>

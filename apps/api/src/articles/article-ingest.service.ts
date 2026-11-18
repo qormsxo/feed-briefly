@@ -10,16 +10,18 @@ import {
   CrawledPage,
   HtmlCrawlerService,
 } from '../crawl/html-crawler.service';
-import { filterByKeywords } from '../crawl/keyword-filter';
-import { newsThemeLabel } from '../crawl/news-themes';
+import { filterByKeywords, focusKeywords } from '../crawl/keyword-filter';
+import { FOCUS_THEME_ID } from '../crawl/news-themes';
 import { UserKeywordsService } from '../crawl/user-keywords.service';
 import { UserThemesService } from '../crawl/user-themes.service';
+import { summaryCharBudget } from '../digest/kakao-text';
 import { ArticleBrief, GeminiService } from '../gemini/gemini.service';
 import { Article } from './article.entity';
 
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 const MAX_BRIEFS_PER_USER = 12;
+
 
 @Injectable()
 export class ArticleIngestService {
@@ -90,13 +92,61 @@ export class ArticleIngestService {
     let fetched = 0;
     let matched = 0;
 
+    const add = (
+      picked: CollectedPage[],
+      userId: string,
+      theme: string,
+      focus: string,
+    ) => {
+      let added = 0;
+
+      for (const page of picked) {
+        const key = `${userId}\0${page.link}`;
+
+        if (seen.has(key)) {
+          continue;
+        }
+
+        seen.add(key);
+        pending.push({ page, userId, theme, focus });
+        added += 1;
+      }
+
+      return added;
+    };
+
     for (const rows of rowsByUser.values()) {
-      const preferences = await this.userKeywords.listByUser(rows[0].userId);
-      const quotas = briefsPerTheme(rows.length, MAX_BRIEFS_PER_USER);
+      const userId = rows[0].userId;
+      const preferences = await this.userKeywords.listByUser(userId);
+      const keywords = focusKeywords(preferences.focus);
+      let budget = MAX_BRIEFS_PER_USER;
+
+      if (keywords.length > 0) {
+        const focus = await this.collectFocus(
+          userId,
+          keywords,
+          preferences.exclude,
+          since,
+        );
+
+        if (focus) {
+          fetched += focus.fetched;
+          matched += focus.matched;
+          add(focus.picked, userId, FOCUS_THEME_ID, keywords.join(', '));
+
+          // 키워드를 적었으면 그 키워드 기사만 보낸다. 이미 보낸 기사뿐이어도 테마로 채우지 않는다.
+          // 24시간 안에 키워드 기사가 아예 없을 때만 고른 분야 기사로 대신한다.
+          if (focus.available > 0) {
+            budget = 0;
+          }
+        }
+      }
+
+      const quotas = briefsPerTheme(rows.length, budget);
 
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
-        const room = quotas[index];
+        const room = quotas[index] ?? 0;
 
         if (room <= 0) {
           continue;
@@ -110,17 +160,7 @@ export class ArticleIngestService {
 
         fetched += result.fetched;
         matched += result.matched;
-
-        for (const page of result.picked) {
-          const key = `${row.userId}\0${page.link}`;
-
-          if (seen.has(key)) {
-            continue;
-          }
-
-          seen.add(key);
-          pending.push({ page, userId: row.userId, theme: row.theme });
-        }
+        add(result.picked, userId, row.theme, '');
       }
     }
 
@@ -136,11 +176,8 @@ export class ArticleIngestService {
     let pages: CollectedPage[];
 
     try {
-      pages = await this.collectThemePages(
-        row.theme,
-        since,
-        preferences.focus,
-      );
+      const portal = await this.crawler.collectThemeArticles(row.theme, since);
+      pages = portal.map((page) => ({ ...page, feedId: null }));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.logger.warn(`뉴스 테마 수집 실패 theme=${row.theme} reason=${reason}`);
@@ -148,11 +185,71 @@ export class ArticleIngestService {
       return null;
     }
 
+    const fresh = await this.dropKnown(row.userId, pages);
+    const matched = filterByKeywords(fresh, [], preferences.exclude);
+    const picked = await this.pickInteresting(row.theme, matched, room);
+
+    this.logger.log(
+      `뉴스 테마 수집 theme=${row.theme} candidates=${fresh.length} matched=${matched.length} quota=${room} picked=${picked.length}`,
+    );
+
+    return { fetched: pages.length, matched: matched.length, picked };
+  }
+
+  /**
+   * 관심 키워드는 테마와 섞지 않고 사용자당 한 번, 키워드 그대로 다음 뉴스에서 검색한다.
+   * 본문·제목에 키워드가 실제로 들어간 글만 남긴다. available은 이미 보낸 글까지 포함한 24시간 내 키워드 기사 수다.
+   */
+  private async collectFocus(
+    userId: string,
+    keywords: string[],
+    exclude: string[],
+    since: Date,
+  ) {
+    let pages: CollectedPage[];
+
+    try {
+      const found = await this.crawler.collectKeywordArticles(keywords, since);
+      pages = found.map((page) => ({ ...page, feedId: null }));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`관심 키워드 수집 실패 userId=${userId} reason=${reason}`);
+
+      return null;
+    }
+
+    const available = filterByKeywords(pages, keywords, exclude).length;
+    const fresh = await this.dropKnown(userId, pages);
+    const matched = filterByKeywords(fresh, keywords, exclude);
+
+    if (matched.length === 0) {
+      // 24시간 안에 키워드 기사가 없는 날은 흔하다. 에러가 아니라 0건으로 넘기고 자리는 테마 기사에 준다.
+      this.logger.log(
+        `관심 키워드 기사 없음 keywords=${keywords.join('|')} candidates=${fresh.length}`,
+      );
+
+      return { fetched: pages.length, matched: 0, picked: [], available };
+    }
+
+    const picked = await this.pickInteresting(
+      FOCUS_THEME_ID,
+      matched,
+      MAX_BRIEFS_PER_USER,
+    );
+
+    this.logger.log(
+      `관심 키워드 수집 keywords=${keywords.join('|')} candidates=${fresh.length} matched=${matched.length} picked=${picked.length}`,
+    );
+
+    return { fetched: pages.length, matched: matched.length, picked, available };
+  }
+
+  private async dropKnown(userId: string, pages: CollectedPage[]) {
     const fresh: CollectedPage[] = [];
 
     for (const page of pages) {
       const duplicate = await this.articles.findOneBy({
-        userId: row.userId,
+        userId,
         link: page.link,
       });
 
@@ -161,20 +258,7 @@ export class ArticleIngestService {
       }
     }
 
-    // 포함 substring hard-filter는 쓰지 않는다. 제외만 막고, 관심은 검색·선택에 반영.
-    const matched = filterByKeywords(fresh, [], preferences.exclude);
-    const picked = await this.pickInteresting(
-      row.theme,
-      matched,
-      room,
-      preferences.focus,
-    );
-
-    this.logger.log(
-      `뉴스 테마 수집 theme=${row.theme} candidates=${fresh.length} matched=${matched.length} quota=${room} picked=${picked.length}`,
-    );
-
-    return { fetched: pages.length, matched: matched.length, picked };
+    return fresh;
   }
 
   /** 유저가 직접 누른 수집이 빈손이면 성공 0건 대신 화면에 보여 줄 에러로 올린다. */
@@ -200,6 +284,8 @@ export class ArticleIngestService {
         pending.map((item) => ({
           title: item.page.title,
           source: item.page.text,
+          budget: summaryCharBudget(item.page.link),
+          focus: item.focus || undefined,
         })),
       );
     } catch (error) {
@@ -241,60 +327,10 @@ export class ArticleIngestService {
     return saved;
   }
 
-  private async collectThemePages(
-    theme: string,
-    since: Date,
-    focus: string,
-  ): Promise<CollectedPage[]> {
-    const portal = await this.crawler.collectThemeArticles(theme, since);
-    const pages = portal.map((page) => ({ ...page, feedId: null }));
-
-    if (!focus.trim()) {
-      return pages;
-    }
-
-    const queries = await this.resolveSearchQueries(theme, focus);
-
-    if (queries.length === 0) {
-      return pages;
-    }
-
-    const queried = await this.crawler.collectQueryArticles(queries, since);
-    const seen = new Set(pages.map((page) => page.link));
-
-    for (const page of queried) {
-      if (seen.has(page.link)) {
-        continue;
-      }
-
-      seen.add(page.link);
-      pages.push({ ...page, feedId: null });
-    }
-
-    return pages;
-  }
-
-  private async resolveSearchQueries(theme: string, focus: string) {
-    try {
-      return await this.gemini.expandSearchQueries(
-        focus,
-        newsThemeLabel(theme),
-      );
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        `검색어 확장 실패 theme=${theme} reason=${reason}`,
-      );
-
-      return [focus.slice(0, 60)];
-    }
-  }
-
   private async pickInteresting<T extends { title: string; text: string }>(
     theme: string,
     pages: T[],
     room: number,
-    focus: string,
   ) {
     if (pages.length <= room) {
       return pages;
@@ -305,7 +341,6 @@ export class ArticleIngestService {
         pages.map((page) => ({ title: page.title, lead: page.text })),
         room,
         theme,
-        focus || undefined,
       );
 
       return order.slice(0, room).map((index) => pages[index]).filter(Boolean);
@@ -326,6 +361,7 @@ type PendingBrief = {
   page: CollectedPage;
   userId: string;
   theme: string;
+  focus: string;
 };
 
 type Collected = {

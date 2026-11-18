@@ -43,3 +43,28 @@ export function filterByKeywords<T extends { title: string; text: string }>(
     return includes.some((word) => haystack.includes(word));
   });
 }
+
+export const MAX_FOCUS_KEYWORDS = 5;
+
+/** 관심 칸 "카리나, 엔비디아"를 키워드 목록으로 나눈다. 쉼표 기준, 2~40자. */
+export function focusKeywords(focus: string): string[] {
+  const seen = new Set<string>();
+  const words: string[] = [];
+
+  for (const raw of focus.split(/[,，]/)) {
+    const word = normalizeKeyword(raw);
+
+    if (!word || seen.has(word)) {
+      continue;
+    }
+
+    seen.add(word);
+    words.push(word);
+
+    if (words.length >= MAX_FOCUS_KEYWORDS) {
+      break;
+    }
+  }
+
+  return words;
+}

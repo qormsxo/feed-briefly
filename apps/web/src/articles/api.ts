@@ -32,6 +32,7 @@ export function listArticles(page: number, limit = 10) {
 export function ingestArticles() {
   return http<{
     count: number;
+    focusCount: number;
     sent: number;
     kakaoError: string | null;
     kakaoSkipped: boolean;

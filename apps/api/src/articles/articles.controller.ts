@@ -4,6 +4,7 @@ import { SESSION_COOKIE } from '../auth/auth.constants';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { FOCUS_THEME_ID } from '../crawl/news-themes';
 import { DigestService } from '../digest/digest.service';
 import { ArticleIngestService } from './article-ingest.service';
 import { ArticlesService } from './articles.service';
@@ -41,6 +42,8 @@ export class ArticlesController {
 
     return {
       count: articles.length,
+      focusCount: articles.filter((article) => article.theme === FOCUS_THEME_ID)
+        .length,
       sent: kakao.sent,
       kakaoError: kakao.error ?? null,
       kakaoSkipped: kakao.skipped ?? false,

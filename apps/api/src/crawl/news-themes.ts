@@ -12,6 +12,14 @@ export function googleNews(query: string) {
   return `https://news.google.com/rss/search?q=${q}&hl=ko&gl=KR&ceid=KR:ko`;
 }
 
+/** 다음 뉴스 검색 최신순. 구글 뉴스 RSS 링크는 원문 주소로 풀 수 없어서 키워드 검색은 여기로 한다. */
+export function daumNewsSearch(query: string, page = 1) {
+  const q = encodeURIComponent(query);
+  const paging = page > 1 ? `&p=${page}` : '';
+
+  return `https://search.daum.net/search?w=news&q=${q}&sort=recency${paging}`;
+}
+
 export const NEWS_THEMES: NewsTheme[] = [
   {
     id: 'politics',
@@ -93,7 +101,14 @@ export function getNewsTheme(id: string) {
   return byId.get(id) ?? null;
 }
 
+/** 관심 키워드 검색으로 모은 글. 테마 카탈로그에는 없고 기사 출처 표시에만 쓴다. */
+export const FOCUS_THEME_ID = 'focus';
+
 export function newsThemeLabel(id: string) {
+  if (id === FOCUS_THEME_ID) {
+    return '관심 키워드';
+  }
+
   return byId.get(id)?.label ?? id;
 }
 

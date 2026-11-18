@@ -9,8 +9,8 @@ import {
 
 export class UpdateUserKeywordsDto {
   @ApiPropertyOptional({
-    example: '반도체 수출과 금리 인하 소식',
-    description: '관심 한 줄. 검색 쿼리 시드로 쓴다.',
+    example: '카리나, 엔비디아',
+    description: '관심 키워드. 쉼표로 구분하고, 키워드가 들어간 기사만 따로 모은다.',
   })
   @IsOptional()
   @IsString()

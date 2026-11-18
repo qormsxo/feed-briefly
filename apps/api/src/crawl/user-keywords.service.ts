@@ -93,7 +93,7 @@ function normalizeFocus(raw: string): string | null {
 
   if (focus.length > MAX_FOCUS_LENGTH) {
     throw new BadRequestException(
-      `관심 한 줄은 ${MAX_FOCUS_LENGTH}자 이하로 적어 주세요`,
+      `관심 키워드는 ${MAX_FOCUS_LENGTH}자 이하로 적어 주세요`,
     );
   }
 
