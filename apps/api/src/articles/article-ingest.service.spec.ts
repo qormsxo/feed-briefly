@@ -7,9 +7,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { HtmlCrawlerService } from '../crawl/html-crawler.service';
 import { UserKeywordsService } from '../crawl/user-keywords.service';
 import { UserThemesService } from '../crawl/user-themes.service';
-import { FeedsService } from '../feeds/feeds.service';
 import { GeminiService } from '../gemini/gemini.service';
-import { RssParserService } from '../rss/rss-parser.service';
 import { Article } from './article.entity';
 import { ArticleIngestService } from './article-ingest.service';
 
@@ -39,31 +37,31 @@ async function createService(options: {
           save: (value: Partial<Article>) => Promise.resolve(value),
         },
       },
-      { provide: FeedsService, useValue: {} },
-      { provide: RssParserService, useValue: {} },
       {
         provide: UserThemesService,
         useValue: {
-          listByUser: () => Promise.resolve([{ userId: USER_ID, theme: 'it' }]),
+          listByUser: () => Promise.resolve([{ userId: USER_ID, theme: 'tech' }]),
         },
       },
       {
         provide: UserKeywordsService,
         useValue: {
-          listByUser: () => Promise.resolve({ include: [], exclude: [] }),
+          listByUser: () => Promise.resolve({ focus: '', exclude: [] }),
         },
       },
       {
         provide: HtmlCrawlerService,
         useValue: {
           collectThemeArticles: () => Promise.resolve(options.pages),
+          collectQueryArticles: () => Promise.resolve([]),
         },
       },
       {
         provide: GeminiService,
         useValue: {
           summarizeMany: options.summarize,
-          rankByInterest: () => Promise.resolve([0]),
+          selectInteresting: () => Promise.resolve([0]),
+          expandSearchQueries: () => Promise.resolve([]),
         },
       },
     ],

@@ -6,7 +6,7 @@ export type NewsTheme = {
   listings: string[];
 };
 
-function googleNews(query: string) {
+export function googleNews(query: string) {
   const q = encodeURIComponent(query);
 
   return `https://news.google.com/rss/search?q=${q}&hl=ko&gl=KR&ceid=KR:ko`;

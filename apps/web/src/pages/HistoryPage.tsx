@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ingestArticles, listArticles } from '../articles/api';
 import { errorText } from '../lib/http';
@@ -8,22 +8,19 @@ import {
   listThemes,
   saveKeywords,
   saveThemes,
-  type UserKeywords,
 } from '../themes/api';
-
-const KEYWORD_FIELDS: {
-  kind: keyof UserKeywords;
-  label: string;
-  hint: string;
-}[] = [
-  { kind: 'include', label: '포함', hint: '포함할 키워드' },
-  { kind: 'exclude', label: '제외', hint: '제외할 키워드' },
-];
 
 export function HistoryPage() {
   const [page, setPage] = useState(1);
+  const [focusDraft, setFocusDraft] = useState('');
   const themes = useQuery({ queryKey: ['themes'], queryFn: listThemes });
   const keywords = useQuery({ queryKey: ['keywords'], queryFn: listKeywords });
+
+  useEffect(() => {
+    if (keywords.data) {
+      setFocusDraft(keywords.data.focus);
+    }
+  }, [keywords.data]);
 
   const saveMutation = useMutation({
     mutationFn: saveThemes,
@@ -36,6 +33,7 @@ export function HistoryPage() {
     mutationFn: saveKeywords,
     onSuccess: (data) => {
       queryClient.setQueryData(['keywords'], data);
+      setFocusDraft(data.focus);
     },
   });
 
@@ -61,18 +59,30 @@ export function HistoryPage() {
 
   const keywordError = errorText(
     keywordMutation.error,
-    '키워드 저장에 실패했습니다',
+    '관심 설정 저장에 실패했습니다',
   );
 
   const ingestError = errorText(ingestMutation.error, '수집에 실패했습니다');
 
-  const keywordValue = keywords.data ?? { include: [], exclude: [] };
+  const keywordValue = keywords.data ?? { focus: '', exclude: [] };
 
-  function editKeywords(
-    kind: keyof UserKeywords,
-    edit: (words: string[]) => string[],
-  ) {
-    keywordMutation.mutate({ ...keywordValue, [kind]: edit(keywordValue[kind]) });
+  function savePreferences(next: { focus: string; exclude: string[] }) {
+    keywordMutation.mutate(next);
+  }
+
+  function editExclude(edit: (words: string[]) => string[]) {
+    savePreferences({
+      focus: focusDraft,
+      exclude: edit(keywordValue.exclude),
+    });
+  }
+
+  function saveFocus() {
+    if (focusDraft.trim() === keywordValue.focus.trim()) {
+      return;
+    }
+
+    savePreferences({ focus: focusDraft, exclude: keywordValue.exclude });
   }
 
   function toggle(id: string) {
@@ -119,29 +129,42 @@ export function HistoryPage() {
           {saveError ? (
             <p className="mt-3 text-sm text-red-400">{saveError}</p>
           ) : null}
-          {KEYWORD_FIELDS.map((field) => (
-            <KeywordField
-              key={field.kind}
-              label={field.label}
-              hint={field.hint}
-              words={keywordValue[field.kind]}
+          <form
+            className="mt-3 flex flex-wrap items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveFocus();
+            }}
+          >
+            <span className="text-[12px] text-zinc-300">관심</span>
+            <input
+              value={focusDraft}
               disabled={keywords.isLoading || keywordMutation.isPending}
-              onAdd={(words) =>
-                editKeywords(field.kind, (current) => [...current, ...words])
-              }
-              onRemove={(word) =>
-                editKeywords(field.kind, (current) =>
-                  current.filter((item) => item !== word),
-                )
-              }
+              maxLength={120}
+              placeholder="예: 반도체 수출과 금리"
+              className="h-8 min-w-[14rem] flex-1 rounded-lg bg-zinc-900 px-2.5 text-[13px] text-zinc-100 ring-1 ring-zinc-700 outline-none placeholder:text-zinc-400 disabled:opacity-60"
+              onChange={(event) => setFocusDraft(event.target.value)}
+              onBlur={saveFocus}
             />
-          ))}
+          </form>
+          <KeywordField
+            label="제외"
+            hint="제외할 키워드"
+            words={keywordValue.exclude}
+            disabled={keywords.isLoading || keywordMutation.isPending}
+            onAdd={(words) =>
+              editExclude((current) => [...current, ...words])
+            }
+            onRemove={(word) =>
+              editExclude((current) => current.filter((item) => item !== word))
+            }
+          />
           {keywordError ? (
             <p className="mt-3 text-sm text-red-400">{keywordError}</p>
           ) : null}
           {selected.size === 0 && themes.data ? (
             <p className="mt-3 text-[13px] text-zinc-300">
-              분야를 하나 이상 고르면 그 뉴스를 모읍니다.
+              분야는 시드입니다. 하나 이상 고르고, 관심 한 줄로 검색을 좁힙니다.
             </p>
           ) : null}
         </div>

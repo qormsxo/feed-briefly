@@ -13,7 +13,7 @@ import {
   extractNewsArticle,
   extractNewsListingLinks,
 } from './news-extract';
-import { getNewsTheme } from './news-themes';
+import { getNewsTheme, googleNews } from './news-themes';
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -75,10 +75,28 @@ export class HtmlCrawlerService {
       return [];
     }
 
+    return this.collectFromListings(theme.listings, since, themeId);
+  }
+
+  /** 관심 문장에서 만든 검색어로 구글 뉴스 RSS를 더 모은다. */
+  async collectQueryArticles(
+    queries: string[],
+    since: Date,
+  ): Promise<CrawledPage[]> {
+    const listings = queries.map((query) => googleNews(query));
+
+    return this.collectFromListings(listings, since, 'query');
+  }
+
+  private async collectFromListings(
+    listings: string[],
+    since: Date,
+    label: string,
+  ): Promise<CrawledPage[]> {
     const seen = new Set<string>();
     const buckets: string[][] = [];
 
-    for (const listing of theme.listings) {
+    for (const listing of listings) {
       try {
         const found = await this.listArticles(listing);
         const bucket: string[] = [];
@@ -100,7 +118,7 @@ export class HtmlCrawlerService {
           buckets.push(bucket);
         }
       } catch {
-        this.logger.warn(`뉴스 목록 실패 theme=${themeId} url=${listing}`);
+        this.logger.warn(`뉴스 목록 실패 label=${label} url=${listing}`);
       }
     }
 
