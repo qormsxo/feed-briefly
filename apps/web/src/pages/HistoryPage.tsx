@@ -1,6 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ingestArticles, listArticles } from '../articles/api';
+import {
+  Article,
+  ArticlePage,
+  Feedback,
+  ingestArticles,
+  listArticles,
+  setArticleFeedback,
+} from '../articles/api';
 import { errorText } from '../lib/http';
 import { queryClient } from '../lib/query-client';
 import {
@@ -45,6 +52,34 @@ export function HistoryPage() {
     },
   });
 
+  const feedbackMutation = useMutation({
+    mutationFn: (input: { id: string; value: Feedback | null }) =>
+      setArticleFeedback(input.id, input.value),
+    onMutate: async ({ id, value }) => {
+      const key = ['articles', page];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<ArticlePage>(key);
+
+      queryClient.setQueryData<ArticlePage>(key, (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === id ? { ...item, feedback: value } : item,
+              ),
+            }
+          : current,
+      );
+
+      return { key, previous };
+    },
+    onError: (_error, _input, context) => {
+      if (context) {
+        queryClient.setQueryData(context.key, context.previous);
+      }
+    },
+  });
+
   const history = useQuery({
     queryKey: ['articles', page],
     queryFn: () => listArticles(page),
@@ -63,6 +98,18 @@ export function HistoryPage() {
   );
 
   const ingestError = errorText(ingestMutation.error, '수집에 실패했습니다');
+
+  const feedbackError = errorText(
+    feedbackMutation.error,
+    '평가 저장에 실패했습니다',
+  );
+
+  function rate(article: Article, value: Feedback) {
+    feedbackMutation.mutate({
+      id: article.id,
+      value: article.feedback === value ? null : value,
+    });
+  }
 
   const keywordValue = keywords.data ?? { focus: '', exclude: [] };
 
@@ -218,14 +265,21 @@ export function HistoryPage() {
         <p className="mt-8 text-sm text-zinc-300">아직 요약이 없습니다.</p>
       ) : null}
 
+      {feedbackError ? (
+        <p className="mt-6 text-sm text-red-400">{feedbackError}</p>
+      ) : null}
+
       <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((article) => (
-          <li key={article.id} className="h-full">
+          <li
+            key={article.id}
+            className="group flex h-full flex-col rounded-xl bg-zinc-950 ring-1 ring-zinc-800 transition duration-200 hover:-translate-y-0.5 hover:bg-[#171c26] hover:ring-teal-400/80 hover:shadow-lg hover:shadow-black/40"
+          >
             <a
               href={article.link}
               target="_blank"
               rel="noreferrer"
-              className="group block h-full rounded-xl bg-zinc-950 px-5 py-5 ring-1 ring-zinc-800 transition duration-200 hover:-translate-y-0.5 hover:bg-[#171c26] hover:ring-teal-400/80 hover:shadow-lg hover:shadow-black/40"
+              className="block flex-1 px-5 pt-5 pb-3"
             >
               <div className="flex items-baseline justify-between gap-3 text-[12px] text-zinc-300">
                 <p>
@@ -244,6 +298,20 @@ export function HistoryPage() {
                 {article.summary}
               </p>
             </a>
+            <div className="flex items-center justify-end gap-1.5 px-5 pb-4">
+              <FeedbackButton
+                label="추천"
+                icon="👍"
+                active={article.feedback === 'up'}
+                onClick={() => rate(article, 'up')}
+              />
+              <FeedbackButton
+                label="비추천"
+                icon="👎"
+                active={article.feedback === 'down'}
+                onClick={() => rate(article, 'down')}
+              />
+            </div>
           </li>
         ))}
       </ul>
@@ -272,6 +340,35 @@ export function HistoryPage() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function FeedbackButton({
+  label,
+  icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={active ? `${label} 취소` : label}
+      aria-pressed={active}
+      title={active ? `${label} 취소` : label}
+      className={`rounded-lg px-2 py-1 text-[13px] leading-none transition ${
+        active
+          ? 'bg-teal-500/15 text-teal-300 ring-1 ring-teal-400/70'
+          : 'bg-zinc-900 text-zinc-300 ring-1 ring-zinc-800 grayscale hover:text-white hover:grayscale-0'
+      }`}
+      onClick={onClick}
+    >
+      <span aria-hidden>{icon}</span>
+    </button>
   );
 }
 

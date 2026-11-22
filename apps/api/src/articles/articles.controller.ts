@@ -1,5 +1,21 @@
-import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiCookieAuth,
+  ApiNotFoundResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { SESSION_COOKIE } from '../auth/auth.constants';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -9,6 +25,7 @@ import { DigestService } from '../digest/digest.service';
 import { ArticleIngestService } from './article-ingest.service';
 import { ArticlesService } from './articles.service';
 import { ListArticlesQuery } from './dto/list-articles.query';
+import { SetFeedbackDto } from './dto/set-feedback.dto';
 
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
@@ -27,6 +44,27 @@ export class ArticlesController {
   @ApiOperation({ summary: '내 요약 히스토리' })
   list(@CurrentUser() user: AuthUser, @Query() query: ListArticlesQuery) {
     return this.articles.paginateByUser(user.id, query.page, query.limit);
+  }
+
+  @Put(':id/feedback')
+  @ApiOperation({ summary: '요약 기사 추천(up)/비추천(down) 저장' })
+  @ApiNotFoundResponse({ description: '내 기사가 아님' })
+  setFeedback(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetFeedbackDto,
+  ) {
+    return this.articles.setFeedback(user.id, id, dto.value);
+  }
+
+  @Delete(':id/feedback')
+  @ApiOperation({ summary: '요약 기사 추천/비추천 취소' })
+  @ApiNotFoundResponse({ description: '내 기사가 아님' })
+  clearFeedback(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.articles.clearFeedback(user.id, id);
   }
 
   @Post('ingest')
