@@ -1,5 +1,7 @@
 import { http } from '../lib/http';
 
+export type Feedback = 'up' | 'down';
+
 export type Article = {
   id: string;
   title: string;
@@ -10,6 +12,7 @@ export type Article = {
   feedTitle: string | null;
   feedUrl: string | null;
   theme: string | null;
+  feedback: Feedback | null;
 };
 
 export type ArticlePage = {
@@ -40,4 +43,22 @@ export function ingestArticles() {
     '/api/articles/ingest',
     { method: 'POST' },
   );
+}
+
+export type FeedbackResult = { articleId: string; feedback: Feedback | null };
+
+export function setArticleFeedback(
+  id: string,
+  value: Feedback | null,
+): Promise<FeedbackResult> {
+  const path = `/api/articles/${encodeURIComponent(id)}/feedback`;
+
+  if (value === null) {
+    return http<FeedbackResult>(path, { method: 'DELETE' });
+  }
+
+  return http<FeedbackResult>(path, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  });
 }

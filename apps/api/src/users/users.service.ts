@@ -76,7 +76,7 @@ export class UsersService {
     return this.users.save(user);
   }
 
-  /** 기사·다이제스트 로그까지 지운 뒤 유저를 삭제한다. 테마·키워드·피드는 CASCADE. */
+  /** 기사·다이제스트 로그까지 지운 뒤 유저를 삭제한다. 테마·키워드·피드·기사 피드백은 CASCADE. */
   async deleteAccount(userId: string) {
     const user = await this.findById(userId);
 
